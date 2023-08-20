@@ -15,4 +15,4 @@ optimum
 pypdf
 gradio
 gradio_client==0.2.7
-docx
+python-docx
