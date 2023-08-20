@@ -1,6 +1,6 @@
 ---
 title: Light PDF web QA chatbot
-emoji: 📈
+emoji: 🌍
 colorFrom: yellow
 colorTo: yellow
 sdk: gradio
