@@ -1,0 +1,17 @@
+langchain
+beautifulsoup4
+pandas
+black
+isort
+Flask
+transformers
+--extra-index-url https://download.pytorch.org/whl/cu113
+torch
+sentence_transformers
+faiss-cpu
+bitsandbytes
+accelerate
+optimum
+pypdf
+gradio
+gradio_client==0.2.7
