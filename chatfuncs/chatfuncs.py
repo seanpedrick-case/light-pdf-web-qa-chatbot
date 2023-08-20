@@ -26,10 +26,12 @@ from langchain.docstore.document import Document
 
 # For keyword extraction
 import nltk
+nltk.download('wordnet')
 from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
 import keybert
+
 #from transformers.pipelines import pipeline
 
 # For Name Entity Recognition model
