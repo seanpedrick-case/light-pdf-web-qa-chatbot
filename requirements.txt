@@ -16,3 +16,4 @@ pypdf
 gradio
 gradio_client==0.2.7
 python-docx
+gpt4all
