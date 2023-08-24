@@ -83,10 +83,11 @@ ner_model = SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base-mu
 
 ## Initialise keyword model ##
 # Used to pull out keywords from chat history to add to user queries behind the scenes
-kw_model = pipeline("feature-extraction", model="thenlper/gte-base")
+kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniLM-L6-v2")
 
 ## Chat models ##
-ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/orca_mini_3B-GGML', model_type='llama', model_file='orca-mini-3b.ggmlv3.q4_0.bin')
+ctrans_llm = [] # Not leaded by default
+#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/orca_mini_3B-GGML', model_type='llama', model_file='orca-mini-3b.ggmlv3.q4_0.bin')
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/orca_mini_3B-GGML', model_type='llama', model_file='orca-mini-3b.ggmlv3.q8_0.bin')
 #gpt4all_model = GPT4All(model_name= "orca-mini-3b.ggmlv3.q4_0.bin", model_path="models/") # "ggml-mpt-7b-chat.bin"
 
