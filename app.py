@@ -63,6 +63,8 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 
     print(f"> Total split documents: {len(docs_out)}")
 
+    print(docs_out)
+
     vectorstore_func = FAISS.from_documents(documents=docs_out, embedding=embeddings)
         
     '''  
@@ -99,7 +101,7 @@ with block:
     #with gr.Row():
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown("By default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select below. The chatbot will not answer questions where answered can't be found on the website.\n\nIf switching topic, please click the 'New topic' button as the bot will assume follow up questions are linked to the first. Sources are shown underneath the chat area.")
+    gr.Markdown("Chat with a document (alpha). By default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page (feature temporarily disabled), please select below. The chatbot will not answer questions where answered can't be found on the website.\n\nIf switching topic, please click the 'New topic' button as the bot will assume follow up questions are linked to the first. Sources are shown underneath the chat area.\n\nPlease note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
 
     with gr.Tab("Chatbot"):
 
@@ -135,11 +137,11 @@ with block:
             in_pdf = gr.File(label="Upload pdf", file_count="multiple", file_types=['.pdf'])
             load_pdf = gr.Button(value="Load in file", variant="secondary", scale=0)
         
-        with gr.Accordion("Web page", open = False):
+        with gr.Accordion("Web page - Temporarily disabled", open = False):
             with gr.Row():
                 in_web = gr.Textbox(label="Enter webpage url")
                 in_div = gr.Textbox(label="(Advanced) Webpage div for text extraction", value="p", placeholder="p")
-            load_web = gr.Button(value="Load in webpage", variant="secondary", scale=0) 
+            load_web = gr.Button(value="Load in webpage", variant="secondary", scale=0, visible=False) 
         
         ingest_embed_out = gr.Textbox(label="File/webpage preparation progress")
 
@@ -151,7 +153,7 @@ with block:
     ingest_metadata = gr.State()
     ingest_docs = gr.State()
 
-    #embeddings_state = gr.State()
+    embeddings_state = gr.State()
     vectorstore_state = gr.State()
 
     chat_history_state = gr.State()
@@ -163,7 +165,7 @@ with block:
     # Load in a pdf
     load_pdf_click = load_pdf.click(ing.parse_file, inputs=[in_pdf], outputs=[ingest_text]).\
              then(ing.text_to_docs, inputs=[ingest_text], outputs=[ingest_docs]).\
-             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=ingest_embed_out)
+             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=ingest_embed_out) # #then(load_embeddings, outputs=[embeddings_state]).\
              #then(hide_examples)
 
     # Load in a webpage

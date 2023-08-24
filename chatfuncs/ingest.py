@@ -272,6 +272,8 @@ def parse_html(page_url, div_filter="p"):
     texts.append(clean_text)
     metadatas.append({"source": page_url, "date":str(date)})
 
+    print(metadatas)
+
     return texts, metadatas
 
 # +
@@ -300,9 +302,10 @@ def text_to_docs(text_dict: dict, chunk_size: int = chunk_size) -> List[Document
             print(f"Unsupported file type {ext} for {file_path}. Skipping.")
             continue
 
-
-        match = re.search(r'.*[\/\\](.+)$', file_path)
-        filename_end = match.group(1)
+        #match = re.search(r'.*[\/\\](.+)$', file_path)
+        match = re.search(r'(.*[\/\\])?(.+)$', file_path)
+        
+        filename_end = match.group(2) if match else ''
 
         # Add filename as metadata
         for doc in docs: doc.metadata["source"] = filename_end
@@ -311,7 +314,7 @@ def text_to_docs(text_dict: dict, chunk_size: int = chunk_size) -> List[Document
         doc_sections.extend(docs)
         #parent_doc_sections.extend(parent_docs)
 
-    return doc_sections, page_docs
+    return doc_sections#, page_docs
 
 def pdf_text_to_docs(text, chunk_size: int = chunk_size) -> List[Document]:
     """Converts a string or list of strings to a list of Documents
@@ -378,7 +381,9 @@ def html_text_to_docs(texts, metadatas, chunk_size:int = chunk_size):
     documents = text_splitter.create_documents(texts, metadatas=metadatas)
 
     for i, section in enumerate(documents):
-        section.metadata["section"] = i + 1
+        section.metadata["page_section"] = i + 1
+
+    
 
     return documents
 
@@ -456,7 +461,7 @@ def load_embeddings(model_name = "thenlper/gte-base"):
 
     embeddings = embeddings_func
 
-    #return embeddings_func
+    return embeddings_func
 
 def embed_faiss_save_to_zip(docs_out, save_to="faiss_lambeth_census_embedding", model_name = "thenlper/gte-base"):
 
