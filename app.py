@@ -78,11 +78,11 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
     #    os.mkdir(save_to)
     #    vectorstore_func.save_local(folder_path=save_to)
 
-    global vectorstore
+    #global vectorstore
 
-    vectorstore = vectorstore_func
+    #vectorstore = vectorstore_func
 
-    chatf.vectorstore = vectorstore
+    chatf.vectorstore = vectorstore_func
 
     out_message = "Document processing complete"
 
