@@ -45,7 +45,7 @@ start_index = True
 
 ## Parse files
 
-def parse_file(file_paths, div:str = "p"):
+def parse_file(file_paths):
     """
     Accepts a list of file paths, determines each file's type based on its extension,
     and passes it to the relevant parsing function.
@@ -82,6 +82,7 @@ def parse_file(file_paths, div:str = "p"):
     }
     
     parsed_contents = {}
+    file_names = []
 
     for file_path in file_paths:
         print(file_path.name)
@@ -92,8 +93,12 @@ def parse_file(file_paths, div:str = "p"):
             parsed_contents[file_path.name] = extension_to_parser[file_extension](file_path.name)
         else:
             parsed_contents[file_path.name] = f"Unsupported file type: {file_extension}"
+
+        filename_end = get_file_path_end(file_path.name)
+
+        file_names.append(filename_end)
     
-    return parsed_contents
+    return parsed_contents, file_names
 
 def text_regex_clean(text):
     # Merge hyphenated words
@@ -272,9 +277,16 @@ def parse_html(page_url, div_filter="p"):
     texts.append(clean_text)
     metadatas.append({"source": page_url, "date":str(date)})
 
-    print(metadatas)
+    #print(metadatas)
 
-    return texts, metadatas
+    return texts, metadatas, page_url
+
+def get_file_path_end(file_path):
+    match = re.search(r'(.*[\/\\])?(.+)$', file_path)
+        
+    filename_end = match.group(2) if match else ''
+
+    return filename_end
 
 # +
 # Convert parsed text to docs
@@ -302,10 +314,11 @@ def text_to_docs(text_dict: dict, chunk_size: int = chunk_size) -> List[Document
             print(f"Unsupported file type {ext} for {file_path}. Skipping.")
             continue
 
-        #match = re.search(r'.*[\/\\](.+)$', file_path)
-        match = re.search(r'(.*[\/\\])?(.+)$', file_path)
         
-        filename_end = match.group(2) if match else ''
+        filename_end = get_file_path_end(file_path)
+
+        #match = re.search(r'(.*[\/\\])?(.+)$', file_path)
+        #filename_end = match.group(2) if match else ''
 
         # Add filename as metadata
         for doc in docs: doc.metadata["source"] = filename_end

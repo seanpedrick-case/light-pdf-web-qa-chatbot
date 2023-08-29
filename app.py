@@ -101,7 +101,9 @@ with block:
     #with gr.Row():
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown("Chat with a document (alpha). By default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page (feature temporarily disabled), please select below. The chatbot will not answer questions where answered can't be found on the website. If switching topic, please click the 'New topic' button as the bot will assume follow up questions are linked to the first. Sources are shown underneath the chat area.\n\nWarnings: Please ensure that the document is not sensitive is any way as other users may see it!\n\nPlease note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+    gr.Markdown("Chat with a document (alpha). By default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page (feature temporarily disabled), please select below. The chatbot will not answer questions where answered can't be found on the website. If switching topic, please click the 'New topic' button as the bot will assume follow up questions are linked to the first. Sources are shown underneath the chat area.\n\nWarnings: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+
+    current_source = gr.Textbox(label="Current data source that is loaded into the app", value="Lambeth_2030-Our_Future_Our_Lambeth.pdf")
 
     with gr.Tab("Chatbot"):
 
@@ -128,7 +130,7 @@ with block:
         )
 
         with gr.Row():
-            current_topic = gr.Textbox(label="Current conversation topic. If you want to talk about something else, press 'New topic'", placeholder="Keywords related to the conversation topic will appear here")
+            current_topic = gr.Textbox(label="Keywords related to current conversation topic. If you want to talk about something else, press 'New topic'", placeholder="Keywords related to the conversation topic will appear here")
             clear = gr.Button(value="New topic", variant="secondary", scale=0)  
 
 
@@ -163,13 +165,13 @@ with block:
     #    return gr.Examples.update(visible=False)
 
     # Load in a pdf
-    load_pdf_click = load_pdf.click(ing.parse_file, inputs=[in_pdf], outputs=[ingest_text]).\
+    load_pdf_click = load_pdf.click(ing.parse_file, inputs=[in_pdf], outputs=[ingest_text, current_source]).\
              then(ing.text_to_docs, inputs=[ingest_text], outputs=[ingest_docs]).\
              then(docs_to_faiss_save, inputs=[ingest_docs], outputs=ingest_embed_out) # #then(load_embeddings, outputs=[embeddings_state]).\
              #then(hide_examples)
 
     # Load in a webpage
-    load_web_click = load_web.click(ing.parse_html, inputs=[in_web, in_div], outputs=[ingest_text, ingest_metadata]).\
+    load_web_click = load_web.click(ing.parse_html, inputs=[in_web, in_div], outputs=[ingest_text, ingest_metadata, current_source]).\
              then(ing.html_text_to_docs, inputs=[ingest_text, ingest_metadata], outputs=[ingest_docs]).\
              then(docs_to_faiss_save, inputs=[ingest_docs], outputs=ingest_embed_out)
              #then(hide_examples)

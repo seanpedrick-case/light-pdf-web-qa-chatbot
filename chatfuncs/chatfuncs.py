@@ -446,7 +446,7 @@ def get_expanded_passages(vectorstore, docs, width):
     vstore_docs = get_docs_from_vstore(vectorstore)
     parent_vstore_meta_section = [doc.metadata['page_section'] for _, doc in vstore_docs]
 
-    print(docs)
+    #print(docs)
 
     expanded_docs = []
     for doc, score in docs:
@@ -454,11 +454,11 @@ def get_expanded_passages(vectorstore, docs, width):
         search_index = parent_vstore_meta_section.index(search_section) if search_section in parent_vstore_meta_section else -1
         
         content_str, meta_first, meta_last = get_parent_content_and_meta(vstore_docs, width, search_index)
-        print("Meta first:")
-        print(meta_first)
-        print("Meta last:")
-        print(meta_last)
-        print("Meta last end.")
+        #print("Meta first:")
+        #print(meta_first)
+        #print("Meta last:")
+        #print(meta_last)
+        #print("Meta last end.")
         meta_full = merge_two_lists_of_dicts(meta_first, meta_last)
 
         #print(meta_full)
