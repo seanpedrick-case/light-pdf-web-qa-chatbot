@@ -7,7 +7,7 @@ print("Borough plan text created")
 
 #print(borough_plan_text)
 
-borough_plan_docs, borough_plan_page_docs = ing.text_to_docs(borough_plan_text)
+borough_plan_docs = ing.text_to_docs(borough_plan_text)
 print("Borough plan docs created")
 
 embedding_model = "thenlper/gte-base"

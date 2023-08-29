@@ -395,13 +395,13 @@ def hybrid_retrieval(new_question_kworded, k_val, out_passages,
 
             return docs_keep_as_doc, doc_df, docs_keep_out
 
-def get_expanded_passages(vectorstore, docs_keep_out, width):
+def get_expanded_passages(vectorstore, docs, width):
     """
     Extracts expanded passages based on given documents and a width for context.
     
     Parameters:
     - vectorstore: The primary data source.
-    - docs_keep_out: List of documents to be expanded.
+    - docs: List of documents to be expanded.
     - width: Number of documents to expand around a given document for context.
     
     Returns:
@@ -436,8 +436,8 @@ def get_expanded_passages(vectorstore, docs_keep_out, width):
             for key in d1:
                 if key != "source":
                     merged[key] = str(d1[key]) + " to " + str(d2[key])
-            else:
-                merged[key] = d1[key]  # or d2[key], based on preference
+                else:
+                    merged[key] = d1[key]  # or d2[key], based on preference
             return merged
 
     def merge_two_lists_of_dicts(list1, list2):
@@ -446,15 +446,22 @@ def get_expanded_passages(vectorstore, docs_keep_out, width):
     vstore_docs = get_docs_from_vstore(vectorstore)
     parent_vstore_meta_section = [doc.metadata['page_section'] for _, doc in vstore_docs]
 
+    print(docs)
+
     expanded_docs = []
-    for doc, score in docs_keep_out:
+    for doc, score in docs:
         search_section = doc.metadata['page_section']
         search_index = parent_vstore_meta_section.index(search_section) if search_section in parent_vstore_meta_section else -1
         
         content_str, meta_first, meta_last = get_parent_content_and_meta(vstore_docs, width, search_index)
+        print("Meta first:")
+        print(meta_first)
+        print("Meta last:")
+        print(meta_last)
+        print("Meta last end.")
         meta_full = merge_two_lists_of_dicts(meta_first, meta_last)
 
-        print(meta_full)
+        #print(meta_full)
         
         expanded_doc = (Document(page_content=content_str[0], metadata=meta_full[0]), score)
         expanded_docs.append(expanded_doc)
@@ -679,7 +686,7 @@ def highlight_found_text(search_text: str, full_text: str, hlt_chunk_size:int=hl
     if sorted_starts:
         current_start, current_end = sorted_starts[0], found_positions[sorted_starts[0]]
         for start in sorted_starts[1:]:
-            if start <= (current_end + 1):
+            if start <= (current_end + 10):
                 current_end = max(current_end, found_positions[start])
             else:
                 combined_positions.append((current_start, current_end))
