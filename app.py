@@ -89,16 +89,28 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
     #print(out_message)
     #print(f"> Saved to: {save_to}")
 
-    return out_message
+    return out_message, vectorstore_func
 
  # Gradio chat
 
 import gradio as gr
 
+
+
+
 block = gr.Blocks(css=".gradio-container {background-color: black}")
 
 with block:
-    #with gr.Row():
+    ingest_text = gr.State()
+    ingest_metadata = gr.State()
+    ingest_docs = gr.State()
+
+    embeddings_state = gr.State(globals()["embeddings"])
+    vectorstore_state = gr.State(globals()["vectorstore"])  
+
+    chat_history_state = gr.State()
+    instruction_prompt_out = gr.State()
+
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
     gr.Markdown("Chat with a document (alpha). By default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page (feature temporarily disabled), please select below. The chatbot will not answer questions where answered can't be found on the website. If switching topic, please click the 'New topic' button as the bot will assume follow up questions are linked to the first. Sources are shown underneath the chat area.\n\nWarnings: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
@@ -116,7 +128,6 @@ with block:
                 label="What's your question?",
                 lines=1,
             )     
-
 
         submit = gr.Button(value="Send message", variant="secondary", scale = 1)
 
@@ -151,42 +162,32 @@ with block:
         "<center>Powered by Flan Alpaca and Langchain</a></center>"
     )
 
-    ingest_text = gr.State()
-    ingest_metadata = gr.State()
-    ingest_docs = gr.State()
-
-    embeddings_state = gr.State()
-    vectorstore_state = gr.State()
-
-    chat_history_state = gr.State()
-    instruction_prompt_out = gr.State()
-
     #def hide_examples():
     #    return gr.Examples.update(visible=False)
 
     # Load in a pdf
     load_pdf_click = load_pdf.click(ing.parse_file, inputs=[in_pdf], outputs=[ingest_text, current_source]).\
              then(ing.text_to_docs, inputs=[ingest_text], outputs=[ingest_docs]).\
-             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=ingest_embed_out) # #then(load_embeddings, outputs=[embeddings_state]).\
+             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state]) # #then(load_embeddings, outputs=[embeddings_state]).\
              #then(hide_examples)
 
     # Load in a webpage
     load_web_click = load_web.click(ing.parse_html, inputs=[in_web, in_div], outputs=[ingest_text, ingest_metadata, current_source]).\
              then(ing.html_text_to_docs, inputs=[ingest_text, ingest_metadata], outputs=[ingest_docs]).\
-             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=ingest_embed_out)
+             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state])
              #then(hide_examples)
 
     # Load in a webpage
 
     # Click/enter to send message action
-    response_click = submit.click(chatf.get_history_sources_final_input_prompt, inputs=[message, chat_history_state, current_topic], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False).\
+    response_click = submit.click(chatf.get_history_sources_final_input_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False).\
                 then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
                 then(chatf.produce_streaming_answer_chatbot_hf, inputs=[chatbot, instruction_prompt_out], outputs=chatbot)
     response_click.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\
                 then(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
                 then(lambda: gr.update(interactive=True), None, [message], queue=False)
 
-    response_enter = message.submit(chatf.get_history_sources_final_input_prompt, inputs=[message, chat_history_state, current_topic], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False).\
+    response_enter = message.submit(chatf.get_history_sources_final_input_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False).\
                 then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
                 then(chatf.produce_streaming_answer_chatbot_hf, [chatbot, instruction_prompt_out], chatbot)    
     response_enter.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\

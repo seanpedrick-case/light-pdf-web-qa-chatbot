@@ -238,11 +238,11 @@ def create_doc_df(docs_keep_out):
 
             return doc_df
 
-def hybrid_retrieval(new_question_kworded, k_val, out_passages,
+def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_passages,
                            vec_score_cut_off, vec_weight, bm25_weight, svm_weight): # ,vectorstore, embeddings
 
-            vectorstore=globals()["vectorstore"]
-            embeddings=globals()["embeddings"]
+            #vectorstore=globals()["vectorstore"]
+            #embeddings=globals()["embeddings"]
 
 
             docs = vectorstore.similarity_search_with_score(new_question_kworded, k=k_val)
@@ -470,7 +470,7 @@ def get_expanded_passages(vectorstore, docs, width):
 
     return expanded_docs, doc_df
 
-def create_final_prompt(inputs: Dict[str, str], instruction_prompt, content_prompt, extracted_memory): # , 
+def create_final_prompt(inputs: Dict[str, str], instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings): # , 
         
         question =  inputs["question"]
         chat_history = inputs["chat_history"]
@@ -485,7 +485,7 @@ def create_final_prompt(inputs: Dict[str, str], instruction_prompt, content_prom
         #docs_keep_as_doc, docs_content, docs_url = find_relevant_passages(new_question_kworded, k_val = 5, out_passages = 3,
         #                                                                  vec_score_cut_off = 1.3, vec_weight = 1, tfidf_weight = 0.5, svm_weight = 1)
 
-        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, k_val = 5, out_passages = 2,
+        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 5, out_passages = 2,
                                                                           vec_score_cut_off = 1, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
                                                                           #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
         
@@ -523,7 +523,7 @@ def create_final_prompt(inputs: Dict[str, str], instruction_prompt, content_prom
                 
         return instruction_prompt_out, sources_docs_content_string, new_question_kworded
 
-def get_history_sources_final_input_prompt(user_input, history, extracted_memory):#):
+def get_history_sources_final_input_prompt(user_input, history, extracted_memory, vectorstore, embeddings):#):
     
     #if chain_agent is None:
     #    history.append((user_input, "Please click the button to submit the Huggingface API key before using the chatbot (top right)"))
@@ -539,7 +539,7 @@ def get_history_sources_final_input_prompt(user_input, history, extracted_memory
     instruction_prompt, content_prompt = create_prompt_templates()
     instruction_prompt_out, docs_content_string, new_question_kworded =\
                 create_final_prompt({"question": user_input, "chat_history": history}, #vectorstore,
-                                    instruction_prompt, content_prompt, extracted_memory)
+                                    instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings)
     
   
     history.append(user_input)
