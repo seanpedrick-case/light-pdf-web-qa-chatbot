@@ -96,9 +96,7 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 import gradio as gr
 
 
-
-
-block = gr.Blocks(css=".gradio-container {background-color: black}")
+block = gr.Blocks(theme = gr.themes.Base())#css=".gradio-container {background-color: black}")
 
 with block:
     ingest_text = gr.State()
@@ -131,14 +129,12 @@ with block:
 
         submit = gr.Button(value="Send message", variant="secondary", scale = 1)
 
-        examples_set = gr.Examples(label="Examples for the Lambeth Borough Plan",
-            examples=[
-                "What were the five pillars of the previous borough plan?",
+        examples_set = gr.Radio(label="Examples for the Lambeth Borough Plan",
+            #value = "What were the five pillars of the previous borough plan?",
+            choices=["What were the five pillars of the previous borough plan?",
                 "What is the vision statement for Lambeth?",
                 "What are the commitments for Lambeth?",
-                "What are the 2030 outcomes for Lambeth?"],
-            inputs=message,
-        )
+                "What are the 2030 outcomes for Lambeth?"])
 
         with gr.Row():
             current_topic = gr.Textbox(label="Keywords related to current conversation topic. If you want to talk about something else, press 'New topic'", placeholder="Keywords related to the conversation topic will appear here")
@@ -162,25 +158,24 @@ with block:
         "<center>Powered by Flan Alpaca and Langchain</a></center>"
     )
 
-    #def hide_examples():
-    #    return gr.Examples.update(visible=False)
+    examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
 
     # Load in a pdf
     load_pdf_click = load_pdf.click(ing.parse_file, inputs=[in_pdf], outputs=[ingest_text, current_source]).\
              then(ing.text_to_docs, inputs=[ingest_text], outputs=[ingest_docs]).\
-             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state]) # #then(load_embeddings, outputs=[embeddings_state]).\
-             #then(hide_examples)
+             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state]).\
+             then(chatf.hide_block, outputs = [examples_set])
 
     # Load in a webpage
     load_web_click = load_web.click(ing.parse_html, inputs=[in_web, in_div], outputs=[ingest_text, ingest_metadata, current_source]).\
              then(ing.html_text_to_docs, inputs=[ingest_text, ingest_metadata], outputs=[ingest_docs]).\
-             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state])
-             #then(hide_examples)
+             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state]).\
+             then(chatf.hide_block, outputs = [examples_set])
 
     # Load in a webpage
 
     # Click/enter to send message action
-    response_click = submit.click(chatf.get_history_sources_final_input_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False).\
+    response_click = submit.click(chatf.get_history_sources_final_input_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False, api_name="retrieval").\
                 then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
                 then(chatf.produce_streaming_answer_chatbot_hf, inputs=[chatbot, instruction_prompt_out], outputs=chatbot)
     response_click.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\

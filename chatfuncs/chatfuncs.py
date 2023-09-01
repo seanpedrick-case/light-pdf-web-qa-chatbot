@@ -822,6 +822,12 @@ def ctrans_generate(
 def turn_off_interactivity(user_message, history):
         return gr.update(value="", interactive=False), history + [[user_message, None]]
 
+def update_message(dropdown_value):
+        return gr.Textbox.update(value=dropdown_value)
+
+def hide_block():
+        return gr.Radio.update(visible=False)
+
 # # Chat history functions
 
 def clear_chat(chat_history_state, sources, chat_message, current_topic):
