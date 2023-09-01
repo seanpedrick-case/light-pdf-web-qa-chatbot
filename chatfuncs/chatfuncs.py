@@ -54,6 +54,8 @@ PandasDataFrame = TypeVar('pd.core.frame.DataFrame')
 embeddings = None  # global variable setup
 vectorstore = None # global variable setup
 
+max_memory_length = 0 # How long should the memory of the conversation last?
+
 full_text = "" # Define dummy source text (full text) just to enable highlight function to load
 
 ctrans_llm = [] # Define empty list to hold CTrans LLMs for functions to run
@@ -196,7 +198,7 @@ def create_prompt_templates():
 
 def adapt_q_from_chat_history(question, chat_history, extracted_memory, keyword_model=""):#keyword_model): # new_question_keywords, 
  
-        chat_history_str, chat_history_first_q, chat_history_first_ans, max_chat_length = _get_chat_history(chat_history)
+        chat_history_str, chat_history_first_q, chat_history_first_ans, max_memory_length = _get_chat_history(chat_history)
 
         if chat_history_str:
             # Keyword extraction is now done in the add_inputs_to_history function
@@ -838,13 +840,13 @@ def clear_chat(chat_history_state, sources, chat_message, current_topic):
 
     return chat_history_state, sources, chat_message, current_topic
 
-def _get_chat_history(chat_history: List[Tuple[str, str]], max_chat_length:int = 20): # Limit to last x interactions only
+def _get_chat_history(chat_history: List[Tuple[str, str]], max_memory_length:int = max_memory_length): # Limit to last x interactions only
 
-    if not chat_history:
+    if (not chat_history) | (max_memory_length == 0):
         chat_history = []
 
-    if len(chat_history) > max_chat_length:
-        chat_history = chat_history[-max_chat_length:]
+    if len(chat_history) > max_memory_length:
+        chat_history = chat_history[-max_memory_length:]
         
     #print(chat_history)
 
@@ -863,17 +865,17 @@ def _get_chat_history(chat_history: List[Tuple[str, str]], max_chat_length:int =
         ai = f"Assistant: " + ai_s
         conversation += "\n" + "\n".join([human, ai])
 
-    return conversation, first_q, first_ans, max_chat_length
+    return conversation, first_q, first_ans, max_memory_length
 
 def add_inputs_answer_to_history(user_message, history, current_topic):
     
     #history.append((user_message, [-1]))
 
-    chat_history_str, chat_history_first_q, chat_history_first_ans, max_chat_length = _get_chat_history(history)
+    chat_history_str, chat_history_first_q, chat_history_first_ans, max_memory_length = _get_chat_history(history)
 
 
-    # Only get the keywords for the first question and response, or do it every time if over 'max_chat_length' responses in the conversation
-    if (len(history) == 1) | (len(history) > max_chat_length):
+    # Only get the keywords for the first question and response, or do it every time if over 'max_memory_length' responses in the conversation
+    if (len(history) == 1) | (len(history) > max_memory_length):
         
         #print("History after appending is:")
         #print(history)
