@@ -111,7 +111,7 @@ with block:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown("Chat with a document (alpha). This is a small model, that can only answer specific questions that are answered in the text. It cannot give overall impressions of or summarise the document. By default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page (feature temporarily disabled), please select below. The chatbot will not answer questions where answered can't be found on the website. If switching topic, please click the 'New topic' button as the bot will assume follow up questions are linked to the first.\n\nWarnings: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+    gr.Markdown("Chat with a document (alpha). This is a small model, that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. By default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nWarnings: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
 
     current_source = gr.Textbox(label="Current data source that is loaded into the app", value="Lambeth_2030-Our_Future_Our_Lambeth.pdf")
 
@@ -137,8 +137,8 @@ with block:
                 "What are the 2030 outcomes for Lambeth?"])
 
         with gr.Row():
-            current_topic = gr.Textbox(label="Keywords related to current conversation topic. If you want to talk about something else, press 'New topic'", placeholder="Keywords related to the conversation topic will appear here")
-            clear = gr.Button(value="New topic", variant="secondary", scale=0)  
+            current_topic = gr.Textbox(label="Note: Feature currently disabled - Keywords related to current conversation topic. If you want to talk about something else, press 'New topic'", placeholder="Keywords related to the conversation topic will appear here")
+            clear = gr.Button(value="Clear chat", variant="secondary", scale=0)  
 
 
     with gr.Tab("Load in a different PDF file or web page to chat"):

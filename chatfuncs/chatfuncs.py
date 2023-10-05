@@ -46,7 +46,7 @@ import gradio as gr
 
 torch_device = "cuda" if torch.cuda.is_available() else "cpu"
 print("Running on device:", torch_device)
-threads = torch.get_num_threads()
+threads = 8#torch.get_num_threads()
 print("CPU threads:", threads)
 
 PandasDataFrame = TypeVar('pd.core.frame.DataFrame')
@@ -73,7 +73,7 @@ threads: int = threads
 batch_size:int = 512
 context_length:int = 2048
 gpu_layers:int = 0
-sample = False
+sample = True
 
 ## Highlight text constants
 hlt_chunk_size = 20
@@ -91,9 +91,16 @@ kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniL
 ctrans_llm = [] # Not leaded by default
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/orca_mini_3B-GGML', model_type='llama', model_file='orca-mini-3b.ggmlv3.q4_0.bin')
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/orca_mini_3B-GGML', model_type='llama', model_file='orca-mini-3b.ggmlv3.q8_0.bin')
+#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/vicuna-13B-v1.5-16K-GGUF', model_type='llama', model_file='vicuna-13b-v1.5-16k.Q4_K_M.gguf')
+#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/CodeUp-Llama-2-13B-Chat-HF-GGUF', model_type='llama', model_file='codeup-llama-2-13b-chat-hf.Q4_K_M.gguf')
+#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/CodeLlama-13B-Instruct-GGUF', model_type='llama', model_file='codellama-13b-instruct.Q4_K_M.gguf')
+#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-Instruct-v0.1-GGUF', model_type='mistral', model_file='mistral-7b-instruct-v0.1.Q4_K_M.gguf')
+#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf')
+
 #gpt4all_model = GPT4All(model_name= "orca-mini-3b.ggmlv3.q4_0.bin", model_path="models/") # "ggml-mpt-7b-chat.bin"
 
 # Huggingface chat model
+#hf_checkpoint = 'jphme/phi-1_5_Wizard_Vicuna_uncensored'
 hf_checkpoint = 'declare-lab/flan-alpaca-large'
 
 def create_hf_model(model_name):
@@ -115,7 +122,7 @@ def create_hf_model(model_name):
         elif "mpt" in model_name:    
             model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
         else: 
-            model = AutoModelForCausalLM.from_pretrained(model_name)
+            model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = 2048)
 
@@ -397,7 +404,9 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
 
             return docs_keep_as_doc, doc_df, docs_keep_out
 
+
 def get_expanded_passages(vectorstore, docs, width):
+
     """
     Extracts expanded passages based on given documents and a width for context.
     
@@ -410,6 +419,93 @@ def get_expanded_passages(vectorstore, docs, width):
     - expanded_docs: List of expanded Document objects.
     - doc_df: DataFrame representation of expanded_docs.
     """
+
+    from collections import defaultdict
+    
+    def get_docs_from_vstore(vectorstore):
+        vector = vectorstore.docstore._dict
+        return list(vector.items())
+
+    def extract_details(docs_list):
+        docs_list_out = [tup[1] for tup in docs_list]
+        content = [doc.page_content for doc in docs_list_out]
+        meta = [doc.metadata for doc in docs_list_out]
+        return ''.join(content), meta[0], meta[-1]
+    
+    def get_parent_content_and_meta(vstore_docs, width, target):
+        target_range = range(max(0, target - width), min(len(vstore_docs), target + width + 1))
+        parent_vstore_out = [vstore_docs[i] for i in target_range]
+        
+        content_str_out, meta_first_out, meta_last_out = [], [], []
+        for _ in parent_vstore_out:
+            content_str, meta_first, meta_last = extract_details(parent_vstore_out)
+            content_str_out.append(content_str)
+            meta_first_out.append(meta_first)
+            meta_last_out.append(meta_last)
+        return content_str_out, meta_first_out, meta_last_out
+
+    def merge_dicts_except_source(d1, d2):
+            merged = {}
+            for key in d1:
+                if key != "source":
+                    merged[key] = str(d1[key]) + " to " + str(d2[key])
+                else:
+                    merged[key] = d1[key]  # or d2[key], based on preference
+            return merged
+
+    def merge_two_lists_of_dicts(list1, list2):
+        return [merge_dicts_except_source(d1, d2) for d1, d2 in zip(list1, list2)]
+
+    # Step 1: Filter vstore_docs
+    vstore_docs = get_docs_from_vstore(vectorstore)
+    print("Inside get_expanded_passages")
+    print("Docs:", docs)
+    print("Type of Docs:", type(docs))
+    print("Type of first element in Docs:", type(docs[0]))
+    print("Length of first tuple in Docs:", len(docs[0]))
+
+    doc_sources = {doc.metadata['source'] for doc, _ in docs}
+    vstore_docs = [(k, v) for k, v in vstore_docs if v.metadata.get('source') in doc_sources]
+
+    # Step 2: Group by source and proceed
+    vstore_by_source = defaultdict(list)
+    for k, v in vstore_docs:
+        vstore_by_source[v.metadata['source']].append((k, v))
+        
+    expanded_docs = []
+    for doc, score in docs:
+        search_source = doc.metadata['source']
+        search_section = doc.metadata['page_section']
+        parent_vstore_meta_section = [doc.metadata['page_section'] for _, doc in vstore_by_source[search_source]]
+        search_index = parent_vstore_meta_section.index(search_section) if search_section in parent_vstore_meta_section else -1
+
+        content_str, meta_first, meta_last = get_parent_content_and_meta(vstore_by_source[search_source], width, search_index)
+        meta_full = merge_two_lists_of_dicts(meta_first, meta_last)
+
+        expanded_doc = (Document(page_content=content_str[0], metadata=meta_full[0]), score)
+        expanded_docs.append(expanded_doc)
+
+    doc_df = create_doc_df(expanded_docs)  # Assuming you've defined the 'create_doc_df' function elsewhere
+
+    return expanded_docs, doc_df
+
+
+def get_expanded_passages_orig(vectorstore, docs, width):
+
+    """
+    Extracts expanded passages based on given documents and a width for context.
+    
+    Parameters:
+    - vectorstore: The primary data source.
+    - docs: List of documents to be expanded.
+    - width: Number of documents to expand around a given document for context.
+    
+    Returns:
+    - expanded_docs: List of expanded Document objects.
+    - doc_df: DataFrame representation of expanded_docs.
+    """
+
+    from collections import defaultdict
     
     def get_docs_from_vstore(vectorstore):
         vector = vectorstore.docstore._dict
@@ -446,6 +542,7 @@ def get_expanded_passages(vectorstore, docs, width):
         return [merge_dicts_except_source(d1, d2) for d1, d2 in zip(list1, list2)]
 
     vstore_docs = get_docs_from_vstore(vectorstore)
+
     parent_vstore_meta_section = [doc.metadata['page_section'] for _, doc in vstore_docs]
 
     #print(docs)
@@ -522,6 +619,8 @@ def create_final_prompt(inputs: Dict[str, str], instruction_prompt, content_prom
         #print("The final instruction prompt:")
         #print(instruction_prompt_out)
         
+        print('Final prompt is: ')
+        print(instruction_prompt_out)
                 
         return instruction_prompt_out, sources_docs_content_string, new_question_kworded
 
@@ -725,11 +824,11 @@ def produce_streaming_answer_chatbot_hf(history, full_prompt):
     #print(full_prompt)
     
     # Get the model and tokenizer, and tokenize the user text.
-    model_inputs = tokenizer(text=full_prompt, return_tensors="pt").to(torch_device)
+    model_inputs = tokenizer(text=full_prompt, return_tensors="pt", return_attention_mask=False).to(torch_device) # return_attention_mask=False was added
 
     # Start generation on a separate thread, so that we don't block the UI. The text is pulled from the streamer
     # in the main thread. Adds timeout to the streamer to handle exceptions in the generation thread.
-    streamer = TextIteratorStreamer(tokenizer, timeout=60., skip_prompt=True, skip_special_tokens=True)
+    streamer = TextIteratorStreamer(tokenizer, timeout=120., skip_prompt=True, skip_special_tokens=True)
     generate_kwargs = dict(
         model_inputs,
         streamer=streamer,
