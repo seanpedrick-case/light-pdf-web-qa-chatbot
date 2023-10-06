@@ -7,12 +7,13 @@ import numpy as np
 
 # Model packages
 import torch
+torch.cuda.empty_cache()
 from threading import Thread
 from transformers import AutoTokenizer, pipeline, TextIteratorStreamer
 
 # Alternative model sources
 from gpt4all import GPT4All
-from ctransformers import AutoModelForCausalLM
+from ctransformers import AutoModelForCausalLM#, AutoTokenizer
 
 from dataclasses import asdict, dataclass
 
@@ -44,7 +45,11 @@ from gensim.similarities import SparseMatrixSimilarity
 
 import gradio as gr
 
-torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+if torch.cuda.is_available():
+    torch_device = "cuda"
+    gpu_layers = 1
+else: torch_device =  "cpu"
+
 print("Running on device:", torch_device)
 threads = 8#torch.get_num_threads()
 print("CPU threads:", threads)
@@ -72,8 +77,26 @@ stream: bool = True
 threads: int = threads
 batch_size:int = 512
 context_length:int = 2048
-gpu_layers:int = 0
+gpu_layers:int = 0#10#gpu_layers
 sample = True
+
+@dataclass
+class GenerationConfig:
+    temperature: float = temperature
+    top_k: int = top_k
+    top_p: float = top_p
+    repetition_penalty: float = repetition_penalty
+    last_n_tokens: int = last_n_tokens
+    max_new_tokens: int = max_new_tokens
+    #seed: int = 42
+    reset: bool = reset
+    stream: bool = stream
+    threads: int = threads
+    batch_size:int = batch_size
+    context_length:int = context_length
+    gpu_layers:int = gpu_layers
+    #stop: list[str] = field(default_factory=lambda: [stop_string])
+
 
 ## Highlight text constants
 hlt_chunk_size = 20
@@ -87,17 +110,20 @@ ner_model = SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base-mu
 # Used to pull out keywords from chat history to add to user queries behind the scenes
 kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniLM-L6-v2")
 
+
+
 ## Chat models ##
 ctrans_llm = [] # Not leaded by default
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/orca_mini_3B-GGML', model_type='llama', model_file='orca-mini-3b.ggmlv3.q4_0.bin')
-#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/orca_mini_3B-GGML', model_type='llama', model_file='orca-mini-3b.ggmlv3.q8_0.bin')
+ctrans_llm = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **asdict(GenerationConfig()))
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/vicuna-13B-v1.5-16K-GGUF', model_type='llama', model_file='vicuna-13b-v1.5-16k.Q4_K_M.gguf')
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/CodeUp-Llama-2-13B-Chat-HF-GGUF', model_type='llama', model_file='codeup-llama-2-13b-chat-hf.Q4_K_M.gguf')
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/CodeLlama-13B-Instruct-GGUF', model_type='llama', model_file='codellama-13b-instruct.Q4_K_M.gguf')
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-Instruct-v0.1-GGUF', model_type='mistral', model_file='mistral-7b-instruct-v0.1.Q4_K_M.gguf')
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf')
 
-#gpt4all_model = GPT4All(model_name= "orca-mini-3b.ggmlv3.q4_0.bin", model_path="models/") # "ggml-mpt-7b-chat.bin"
+
+#ctokenizer = AutoTokenizer.from_pretrained(ctrans_llm)
 
 # Huggingface chat model
 #hf_checkpoint = 'jphme/phi-1_5_Wizard_Vicuna_uncensored'
@@ -128,7 +154,7 @@ def create_hf_model(model_name):
 
     return model, tokenizer, torch_device
 
-model, tokenizer, torch_device = create_hf_model(model_name = hf_checkpoint)
+#model, tokenizer, torch_device = create_hf_model(model_name = hf_checkpoint)
 
 # Vectorstore funcs
 
@@ -192,6 +218,17 @@ def create_prompt_templates():
     ### User:
     Answer the QUESTION using information from the following CONTENT.
     CONTENT: {summaries}
+    QUESTION: {question}
+
+    ### Response:"""
+
+    instruction_prompt_template_orca_input = """
+    ### System:
+    You are an AI assistant that follows instruction extremely well. Help as much as you can.
+    ### User:
+    Answer the QUESTION using information from the following input.
+    ### Input:
+    {summaries}
     QUESTION: {question}
 
     ### Response:"""
@@ -581,9 +618,6 @@ def create_final_prompt(inputs: Dict[str, str], instruction_prompt, content_prom
         #print("The question passed to the vector search is:")
         #print(new_question_kworded)
         
-        #docs_keep_as_doc, docs_content, docs_url = find_relevant_passages(new_question_kworded, k_val = 5, out_passages = 3,
-        #                                                                  vec_score_cut_off = 1.3, vec_weight = 1, tfidf_weight = 0.5, svm_weight = 1)
-
         docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 5, out_passages = 2,
                                                                           vec_score_cut_off = 1, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
                                                                           #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
@@ -868,8 +902,8 @@ def produce_streaming_answer_chatbot_ctrans(history, full_prompt):
     print("The question is: ")
     print(full_prompt)
 
-    #tokens = ctrans_llm.tokenize(full_prompt)
-
+    tokens = ctrans_llm.tokenize(full_prompt)
+    
     #import psutil
     #from loguru import logger
 
@@ -884,29 +918,13 @@ def produce_streaming_answer_chatbot_ctrans(history, full_prompt):
     #logger.debug(f"{cpu_count=}")
 
     # Pull the generated text from the streamer, and update the model output.
-    config = GenerationConfig(reset=True)
+    #config = GenerationConfig(reset=True)
     history[-1][1] = ""
-    for new_text in ctrans_generate(prompt=full_prompt, config=config):
-        if new_text == None: new_text = ""
-        history[-1][1] += new_text
+    for new_text in ctrans_llm.generate(tokens, top_k=top_k, temperature=temperature, repetition_penalty=repetition_penalty): #ctrans_generate(prompt=tokens, config=config):
+        if new_text == None: new_text =  ""
+        history[-1][1] += ctrans_llm.detokenize(new_text) #new_text
         yield history
 
-@dataclass
-class GenerationConfig:
-    temperature: float = temperature
-    top_k: int = top_k
-    top_p: float = top_p
-    repetition_penalty: float = repetition_penalty
-    last_n_tokens: int = last_n_tokens
-    max_new_tokens: int = max_new_tokens
-    #seed: int = 42
-    reset: bool = reset
-    stream: bool = stream
-    threads: int = threads
-    batch_size:int = batch_size
-    #context_length:int = context_length
-    #gpu_layers:int = gpu_layers
-    #stop: list[str] = field(default_factory=lambda: [stop_string])
 
 def ctrans_generate(
     prompt: str,

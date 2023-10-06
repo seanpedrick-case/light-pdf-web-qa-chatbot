@@ -17,7 +17,7 @@ gradio
 gradio_client==0.2.7
 python-docx
 gpt4all
-ctransformers
+ctransformers[cuda]
 keybert
 span_marker
 gensim

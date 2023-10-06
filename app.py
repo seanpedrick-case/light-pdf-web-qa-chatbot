@@ -11,7 +11,6 @@ from langchain.vectorstores import FAISS
 PandasDataFrame = TypeVar('pd.core.frame.DataFrame')
 
 # Disable cuda devices if necessary
-
 #os.environ['CUDA_VISIBLE_DEVICES'] = '-1' 
 
 #from chatfuncs.chatfuncs import *
@@ -155,7 +154,7 @@ with block:
         ingest_embed_out = gr.Textbox(label="File/webpage preparation progress")
 
     gr.HTML(
-        "<center>Powered by Flan Alpaca and Langchain</a></center>"
+        "<center>Powered by Orca Mini and Langchain</a></center>"
     )
 
     examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
@@ -177,14 +176,14 @@ with block:
     # Click/enter to send message action
     response_click = submit.click(chatf.get_history_sources_final_input_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False, api_name="retrieval").\
                 then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
-                then(chatf.produce_streaming_answer_chatbot_hf, inputs=[chatbot, instruction_prompt_out], outputs=chatbot)
+                then(chatf.produce_streaming_answer_chatbot_ctrans, inputs=[chatbot, instruction_prompt_out], outputs=chatbot)
     response_click.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\
                 then(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
                 then(lambda: gr.update(interactive=True), None, [message], queue=False)
 
     response_enter = message.submit(chatf.get_history_sources_final_input_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False).\
                 then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
-                then(chatf.produce_streaming_answer_chatbot_hf, [chatbot, instruction_prompt_out], chatbot)    
+                then(chatf.produce_streaming_answer_chatbot_ctrans, [chatbot, instruction_prompt_out], chatbot)    
     response_enter.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\
                 then(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
                 then(lambda: gr.update(interactive=True), None, [message], queue=False)
