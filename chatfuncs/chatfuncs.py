@@ -12,9 +12,7 @@ from threading import Thread
 from transformers import AutoTokenizer, pipeline, TextIteratorStreamer
 
 # Alternative model sources
-from gpt4all import GPT4All
 from ctransformers import AutoModelForCausalLM#, AutoTokenizer
-
 from dataclasses import asdict, dataclass
 
 # Langchain functions
@@ -32,8 +30,6 @@ from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
 import keybert
-
-#from transformers.pipelines import pipeline
 
 # For Name Entity Recognition model
 from span_marker import SpanMarkerModel
@@ -69,6 +65,7 @@ temperature: float = 0.1
 top_k: int = 3
 top_p: float = 1
 repetition_penalty: float = 1.05
+flan_alpaca_repetition_penalty: float = 1.3
 last_n_tokens: int = 64
 max_new_tokens: int = 125
 #seed: int = 42
@@ -77,7 +74,7 @@ stream: bool = True
 threads: int = threads
 batch_size:int = 512
 context_length:int = 4096
-gpu_layers:int = 0#5#gpu_layers
+gpu_layers:int = 0#5#gpu_layers For serving on Huggingface set to 0 as using free CPU instance
 sample = True
 
 @dataclass
@@ -99,7 +96,7 @@ class GenerationConfig:
 
 
 ## Highlight text constants
-hlt_chunk_size = 20
+hlt_chunk_size = 15
 hlt_strat = [" ", ".", "!", "?", ":", "\n\n", "\n", ","]
 hlt_overlap = 0
 
@@ -110,51 +107,47 @@ ner_model = SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base-mu
 # Used to pull out keywords from chat history to add to user queries behind the scenes
 kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniLM-L6-v2")
 
-
+## Set model type ##
+model_type = "ctrans"
 
 ## Chat models ##
-ctrans_llm = [] # Not leaded by default
-ctrans_llm = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **asdict(GenerationConfig()))
-#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/vicuna-13B-v1.5-16K-GGUF', model_type='llama', model_file='vicuna-13b-v1.5-16k.Q4_K_M.gguf')
-#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/CodeUp-Llama-2-13B-Chat-HF-GGUF', model_type='llama', model_file='codeup-llama-2-13b-chat-hf.Q4_K_M.gguf')
-#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/CodeLlama-13B-Instruct-GGUF', model_type='llama', model_file='codellama-13b-instruct.Q4_K_M.gguf')
-#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-Instruct-v0.1-GGUF', model_type='mistral', model_file='mistral-7b-instruct-v0.1.Q4_K_M.gguf')
-#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **asdict(GenerationConfig()))
-#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q2_K.gguf', **asdict(GenerationConfig()))
 
+if model_type == "ctrans":
+    ctrans_llm = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **asdict(GenerationConfig()))
+    #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **asdict(GenerationConfig()))
+    #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q2_K.gguf', **asdict(GenerationConfig()))
 
-#ctokenizer = AutoTokenizer.from_pretrained(ctrans_llm)
-
-# Huggingface chat model
-#hf_checkpoint = 'jphme/phi-1_5_Wizard_Vicuna_uncensored'
-hf_checkpoint = 'declare-lab/flan-alpaca-large'
-
-def create_hf_model(model_name):
-
-    from transformers import AutoModelForSeq2SeqLM,  AutoModelForCausalLM
-
-#    model_id = model_name
+if model_type == "hf":
+    # Huggingface chat model
+    #hf_checkpoint = 'jphme/phi-1_5_Wizard_Vicuna_uncensored'
+    hf_checkpoint = 'declare-lab/flan-alpaca-large'
     
-    if torch_device == "cuda":
-        if "flan" in model_name:
-            model = AutoModelForSeq2SeqLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
-        elif "mpt" in model_name:
-            model = AutoModelForCausalLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto", trust_remote_code=True)
+    def create_hf_model(model_name):
+
+        from transformers import AutoModelForSeq2SeqLM,  AutoModelForCausalLM
+
+    #    model_id = model_name
+        
+        if torch_device == "cuda":
+            if "flan" in model_name:
+                model = AutoModelForSeq2SeqLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
+            elif "mpt" in model_name:
+                model = AutoModelForCausalLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto", trust_remote_code=True)
+            else:
+                model = AutoModelForCausalLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
         else:
-            model = AutoModelForCausalLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
-    else:
-        if "flan" in model_name:
-            model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        elif "mpt" in model_name:    
-            model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
-        else: 
-            model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
+            if "flan" in model_name:
+                model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+            elif "mpt" in model_name:    
+                model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
+            else: 
+                model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = 2048)
+        tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = 2048)
 
-    return model, tokenizer, torch_device
+        return model, tokenizer, torch_device
 
-#model, tokenizer, torch_device = create_hf_model(model_name = hf_checkpoint)
+    model, tokenizer, torch_device = create_hf_model(model_name = hf_checkpoint)
 
 # Vectorstore funcs
 
@@ -439,7 +432,6 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
 
             return docs_keep_as_doc, doc_df, docs_keep_out
 
-
 def get_expanded_passages(vectorstore, docs, width):
 
     """
@@ -517,86 +509,6 @@ def get_expanded_passages(vectorstore, docs, width):
         content_str, meta_first, meta_last = get_parent_content_and_meta(vstore_by_source[search_source], width, search_index)
         meta_full = merge_two_lists_of_dicts(meta_first, meta_last)
 
-        expanded_doc = (Document(page_content=content_str[0], metadata=meta_full[0]), score)
-        expanded_docs.append(expanded_doc)
-
-    doc_df = create_doc_df(expanded_docs)  # Assuming you've defined the 'create_doc_df' function elsewhere
-
-    return expanded_docs, doc_df
-
-
-def get_expanded_passages_orig(vectorstore, docs, width):
-
-    """
-    Extracts expanded passages based on given documents and a width for context.
-    
-    Parameters:
-    - vectorstore: The primary data source.
-    - docs: List of documents to be expanded.
-    - width: Number of documents to expand around a given document for context.
-    
-    Returns:
-    - expanded_docs: List of expanded Document objects.
-    - doc_df: DataFrame representation of expanded_docs.
-    """
-
-    from collections import defaultdict
-    
-    def get_docs_from_vstore(vectorstore):
-        vector = vectorstore.docstore._dict
-        return list(vector.items())
-
-    def extract_details(docs_list):
-        docs_list_out = [tup[1] for tup in docs_list]
-        content = [doc.page_content for doc in docs_list_out]
-        meta = [doc.metadata for doc in docs_list_out]
-        return ''.join(content), meta[0], meta[-1]
-    
-    def get_parent_content_and_meta(vstore_docs, width, target):
-        target_range = range(max(0, target - width), min(len(vstore_docs), target + width + 1))
-        parent_vstore_out = [vstore_docs[i] for i in target_range]
-        
-        content_str_out, meta_first_out, meta_last_out = [], [], []
-        for _ in parent_vstore_out:
-            content_str, meta_first, meta_last = extract_details(parent_vstore_out)
-            content_str_out.append(content_str)
-            meta_first_out.append(meta_first)
-            meta_last_out.append(meta_last)
-        return content_str_out, meta_first_out, meta_last_out
-
-    def merge_dicts_except_source(d1, d2):
-            merged = {}
-            for key in d1:
-                if key != "source":
-                    merged[key] = str(d1[key]) + " to " + str(d2[key])
-                else:
-                    merged[key] = d1[key]  # or d2[key], based on preference
-            return merged
-
-    def merge_two_lists_of_dicts(list1, list2):
-        return [merge_dicts_except_source(d1, d2) for d1, d2 in zip(list1, list2)]
-
-    vstore_docs = get_docs_from_vstore(vectorstore)
-
-    parent_vstore_meta_section = [doc.metadata['page_section'] for _, doc in vstore_docs]
-
-    #print(docs)
-
-    expanded_docs = []
-    for doc, score in docs:
-        search_section = doc.metadata['page_section']
-        search_index = parent_vstore_meta_section.index(search_section) if search_section in parent_vstore_meta_section else -1
-        
-        content_str, meta_first, meta_last = get_parent_content_and_meta(vstore_docs, width, search_index)
-        #print("Meta first:")
-        #print(meta_first)
-        #print("Meta last:")
-        #print(meta_last)
-        #print("Meta last end.")
-        meta_full = merge_two_lists_of_dicts(meta_first, meta_last)
-
-        #print(meta_full)
-        
         expanded_doc = (Document(page_content=content_str[0], metadata=meta_full[0]), score)
         expanded_docs.append(expanded_doc)
 
@@ -838,18 +750,6 @@ def highlight_found_text(search_text: str, full_text: str, hlt_chunk_size:int=hl
     return "".join(pos_tokens)
 
 # # Chat functions
-def produce_streaming_answer_chatbot_gpt4all(history, full_prompt): 
-    
-    print("The question is: ")
-    print(full_prompt)
-
-    # Pull the generated text from the streamer, and update the model output. 
-    history[-1][1] = ""
-    for new_text in gpt4all_model.generate(full_prompt, max_tokens=2000, streaming=True):
-        if new_text == None: new_text = ""
-        history[-1][1] += new_text
-        yield history
-          
 def produce_streaming_answer_chatbot_hf(history, full_prompt): 
     
     #print("The question is: ")
@@ -866,7 +766,7 @@ def produce_streaming_answer_chatbot_hf(history, full_prompt):
         streamer=streamer,
         max_new_tokens=max_new_tokens,
         do_sample=sample,
-        repetition_penalty=1.3,
+        repetition_penalty=flan_alpaca_repetition_penalty,
         top_p=top_p,
         temperature=temperature,
         top_k=top_k
@@ -902,26 +802,28 @@ def produce_streaming_answer_chatbot_ctrans(history, full_prompt):
 
     tokens = ctrans_llm.tokenize(full_prompt)
     
-    #import psutil
-    #from loguru import logger
-
-    #_ = [elm for elm in full_prompt.splitlines() if elm.strip()]
-    #stop_string = [elm.split(":")[0] + ":" for elm in _][-2]
-    #print(stop_string)
-
-    #logger.debug(f"{stop_string=} not used")
-
-    #_ = psutil.cpu_count(logical=False) - 1
-    #cpu_count: int = int(_) if _ else 1
-    #logger.debug(f"{cpu_count=}")
+    #config = GenerationConfig(reset=True)
 
     # Pull the generated text from the streamer, and update the model output.
-    #config = GenerationConfig(reset=True)
+    import time
+    start = time.time()
+    NUM_TOKENS=0
+    print('-'*4+'Start Generation'+'-'*4)
+
     history[-1][1] = ""
     for new_text in ctrans_llm.generate(tokens, top_k=top_k, temperature=temperature, repetition_penalty=repetition_penalty): #ctrans_generate(prompt=tokens, config=config):
         if new_text == None: new_text =  ""
         history[-1][1] += ctrans_llm.detokenize(new_text) #new_text
+        NUM_TOKENS+=1
         yield history
+    
+    time_generate = time.time() - start
+    print('\n')
+    print('-'*4+'End Generation'+'-'*4)
+    print(f'Num of generated tokens: {NUM_TOKENS}')
+    print(f'Time for complete generation: {time_generate}s')
+    print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
+    print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
 
 def ctrans_generate(

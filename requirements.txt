@@ -13,8 +13,8 @@ bitsandbytes
 accelerate
 optimum
 pypdf
-gradio
-gradio_client==0.2.7
+gradio==3.47.1
+gradio_client==0.6.0
 python-docx
 gpt4all
 ctransformers[cuda]

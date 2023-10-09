@@ -65,28 +65,11 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
     print(docs_out)
 
     vectorstore_func = FAISS.from_documents(documents=docs_out, embedding=embeddings)
-        
-    '''  
-    #with open("vectorstore.pkl", "wb") as f:
-        #pickle.dump(vectorstore, f) 
-    ''' 
 
-    #if Path(save_to).exists():
-    #    vectorstore_func.save_local(folder_path=save_to)
-    #else:
-    #    os.mkdir(save_to)
-    #    vectorstore_func.save_local(folder_path=save_to)
-
-    #global vectorstore
-
-    #vectorstore = vectorstore_func
 
     chatf.vectorstore = vectorstore_func
 
     out_message = "Document processing complete"
-
-    #print(out_message)
-    #print(f"> Saved to: {save_to}")
 
     return out_message, vectorstore_func
 
@@ -94,6 +77,11 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 
 import gradio as gr
 
+def vote(data: gr.LikeData):
+    if data.liked:
+        print("You upvoted this response: " + data.value)
+    else:
+        print("You downvoted this response: " + data.value)
 
 block = gr.Blocks(theme = gr.themes.Base())#css=".gradio-container {background-color: black}")
 
@@ -117,8 +105,8 @@ with block:
     with gr.Tab("Chatbot"):
 
         with gr.Row():
-            chat_height = 600
-            chatbot = gr.Chatbot(height=chat_height)
+            chat_height = 550
+            chatbot = gr.Chatbot(height=chat_height, avatar_images=('user.jfif', 'bot.jpg'),bubble_full_width = False)
             sources = gr.HTML(value = "Source paragraphs where I looked for answers will appear here", height=chat_height)
 
         with gr.Row():
@@ -193,6 +181,8 @@ with block:
     # Clear box
     clear.click(chatf.clear_chat, inputs=[chat_history_state, sources, message, current_topic], outputs=[chat_history_state, sources, message, current_topic])
     clear.click(lambda: None, None, chatbot, queue=False)
+
+    chatbot.like(vote, None, None)
 
 block.queue(concurrency_count=1).launch(debug=True)
 # -
