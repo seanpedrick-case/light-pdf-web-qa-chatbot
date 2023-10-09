@@ -117,16 +117,17 @@ with block:
     with gr.Tab("Chatbot"):
 
         with gr.Row():
-            chatbot = gr.Chatbot(height=300)
-            sources = gr.HTML(value = "Source paragraphs where I looked for answers will appear here", height=300)
+            chatbot = gr.Chatbot(height=1100)
+            sources = gr.HTML(value = "Source paragraphs where I looked for answers will appear here", height=1100)
 
         with gr.Row():
             message = gr.Textbox(
                 label="What's your question?",
                 lines=1,
             )     
-
-        submit = gr.Button(value="Send message", variant="secondary", scale = 1)
+        with gr.Row():
+            submit = gr.Button(value="Send message", variant="secondary", scale = 1)
+            clear = gr.Button(value="Clear chat", variant="secondary", scale=0)  
 
         examples_set = gr.Radio(label="Examples for the Lambeth Borough Plan",
             #value = "What were the five pillars of the previous borough plan?",
@@ -135,9 +136,9 @@ with block:
                 "What are the commitments for Lambeth?",
                 "What are the 2030 outcomes for Lambeth?"])
 
-        with gr.Row():
-            current_topic = gr.Textbox(label="Note: Feature currently disabled - Keywords related to current conversation topic. If you want to talk about something else, press 'New topic'", placeholder="Keywords related to the conversation topic will appear here")
-            clear = gr.Button(value="Clear chat", variant="secondary", scale=0)  
+        
+        current_topic = gr.Textbox(label="Feature currently disabled - Keywords related to current conversation topic.", placeholder="Keywords related to the conversation topic will appear here")
+            
 
 
     with gr.Tab("Load in a different PDF file or web page to chat"):
