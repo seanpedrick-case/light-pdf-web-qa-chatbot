@@ -47,7 +47,7 @@ import gradio as gr
 
 if torch.cuda.is_available():
     torch_device = "cuda"
-    gpu_layers = 1
+    gpu_layers = 5
 else: torch_device =  "cpu"
 
 print("Running on device:", torch_device)
@@ -76,8 +76,8 @@ reset: bool = False
 stream: bool = True
 threads: int = threads
 batch_size:int = 512
-context_length:int = 2048
-gpu_layers:int = 0#10#gpu_layers
+context_length:int = 4096
+gpu_layers:int = 0#5#gpu_layers
 sample = True
 
 @dataclass
@@ -114,13 +114,13 @@ kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniL
 
 ## Chat models ##
 ctrans_llm = [] # Not leaded by default
-#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/orca_mini_3B-GGML', model_type='llama', model_file='orca-mini-3b.ggmlv3.q4_0.bin')
 ctrans_llm = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **asdict(GenerationConfig()))
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/vicuna-13B-v1.5-16K-GGUF', model_type='llama', model_file='vicuna-13b-v1.5-16k.Q4_K_M.gguf')
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/CodeUp-Llama-2-13B-Chat-HF-GGUF', model_type='llama', model_file='codeup-llama-2-13b-chat-hf.Q4_K_M.gguf')
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/CodeLlama-13B-Instruct-GGUF', model_type='llama', model_file='codellama-13b-instruct.Q4_K_M.gguf')
 #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-Instruct-v0.1-GGUF', model_type='mistral', model_file='mistral-7b-instruct-v0.1.Q4_K_M.gguf')
-#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf')
+#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **asdict(GenerationConfig()))
+#ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q2_K.gguf', **asdict(GenerationConfig()))
 
 
 #ctokenizer = AutoTokenizer.from_pretrained(ctrans_llm)
@@ -222,16 +222,14 @@ def create_prompt_templates():
 
     ### Response:"""
 
-    instruction_prompt_template_orca_input = """
-    ### System:
-    You are an AI assistant that follows instruction extremely well. Help as much as you can.
-    ### User:
-    Answer the QUESTION using information from the following input.
-    ### Input:
-    {summaries}
-    QUESTION: {question}
 
-    ### Response:"""
+    instruction_prompt_mistral_orca = """<|im_start|>system\n
+You are an AI assistant that follows instruction extremely well. Help as much as you can.
+<|im_start|>user\n
+Answer the QUESTION using information from the following CONTENT.
+CONTENT: {summaries}
+QUESTION: {question}\n
+<|im_end|>"""
 
  
 
@@ -986,6 +984,9 @@ def _get_chat_history(chat_history: List[Tuple[str, str]], max_memory_length:int
 
 def add_inputs_answer_to_history(user_message, history, current_topic):
     
+    if history is None:
+        history = [("","")]
+
     #history.append((user_message, [-1]))
 
     chat_history_str, chat_history_first_q, chat_history_first_ans, max_memory_length = _get_chat_history(history)
