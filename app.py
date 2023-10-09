@@ -2,6 +2,9 @@
 
 # +
 import os
+os.system("pip uninstall -y gradio")
+os.system("pip install gradio==3.42.0")
+
 from typing import TypeVar
 from langchain.embeddings import HuggingFaceEmbeddings, HuggingFaceInstructEmbeddings
 from langchain.vectorstores import FAISS
