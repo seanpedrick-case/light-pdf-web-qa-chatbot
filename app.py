@@ -117,7 +117,7 @@ with block:
     with gr.Tab("Chatbot"):
 
         with gr.Row():
-            chat_height = 750
+            chat_height = 600
             chatbot = gr.Chatbot(height=chat_height)
             sources = gr.HTML(value = "Source paragraphs where I looked for answers will appear here", height=chat_height)
 
