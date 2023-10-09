@@ -1,23 +1,17 @@
 langchain
 beautifulsoup4
 pandas
-black
-isort
-Flask
 transformers
 --extra-index-url https://download.pytorch.org/whl/cu113
 torch
 sentence_transformers
 faiss-cpu
 bitsandbytes
-accelerate
-optimum
 pypdf
-gradio==3.47.1
-gradio_client==0.6.0
 python-docx
-gpt4all
 ctransformers[cuda]
 keybert
 span_marker
 gensim
+gradio==3.42.0
+gradio_client

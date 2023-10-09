@@ -1,0 +1,51 @@
+With 5 gpu layers, batch size 8
+
+Num of generated tokens: 113
+Time for complete generation: 115.42684650421143s
+Tokens per secound: 0.9789750255013432
+Time per token: 1021.4765177363843ms
+
+With 5 gpu layers, batch size 512
+
+Num of generated tokens: 102
+Time for complete generation: 40.369266986846924s
+Tokens per secound: 2.5266745624396285
+Time per token: 395.77712732202866ms
+
+With 6 gpu layers - 
+
+Num of generated tokens: 113
+Time for complete generation: 46.37785983085632s
+Tokens per secound: 2.4365074285902764
+Time per token: 410.42353832616215ms
+
+With 6 gpu layers, batch size 1024 - 
+Five pillars Q:
+Num of generated tokens: 102
+Time for complete generation: 41.85241961479187s
+Tokens per secound: 2.4371350793766346
+Time per token: 410.31783936070457ms
+
+With 8 threads
+Num of generated tokens: 102
+Time for complete generation: 40.64410996437073s
+Tokens per secound: 2.5095887224351774
+Time per token: 398.4716663173601ms
+
+Vision statement Q:
+Num of generated tokens: 84
+Time for complete generation: 35.57932233810425s
+Tokens per secound: 2.360921863597128
+Time per token: 423.5633611679077ms
+
+Commitments Q:
+Num of generated tokens: 50
+Time for complete generation: 23.73319172859192s
+Tokens per secound: 2.106754142965266
+Time per token: 474.6638345718384ms
+
+Outcomes Q
+Num of generated tokens: 167
+Time for complete generation: 52.302518367767334s
+Tokens per secound: 3.1929628861412094
+Time per token: 313.1887327411217ms

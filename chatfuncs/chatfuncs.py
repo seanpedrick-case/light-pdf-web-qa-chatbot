@@ -1,13 +1,13 @@
 import re
 import datetime
 from typing import TypeVar, Dict, List, Tuple
+import time
 from itertools import compress
 import pandas as pd
 import numpy as np
 
 # Model packages
 import torch
-torch.cuda.empty_cache()
 from threading import Thread
 from transformers import AutoTokenizer, pipeline, TextIteratorStreamer
 
@@ -16,7 +16,6 @@ from ctransformers import AutoModelForCausalLM#, AutoTokenizer
 from dataclasses import asdict, dataclass
 
 # Langchain functions
-from langchain import PromptTemplate
 from langchain.prompts import PromptTemplate
 from langchain.vectorstores import FAISS
 from langchain.retrievers import SVMRetriever 
@@ -41,64 +40,25 @@ from gensim.similarities import SparseMatrixSimilarity
 
 import gradio as gr
 
-if torch.cuda.is_available():
-    torch_device = "cuda"
-    gpu_layers = 5
-else: torch_device =  "cpu"
-
-print("Running on device:", torch_device)
-threads = 8#torch.get_num_threads()
-print("CPU threads:", threads)
+torch.cuda.empty_cache()
 
 PandasDataFrame = TypeVar('pd.core.frame.DataFrame')
 
 embeddings = None  # global variable setup
 vectorstore = None # global variable setup
+model_type = None # global variable setup
 
 max_memory_length = 0 # How long should the memory of the conversation last?
 
 full_text = "" # Define dummy source text (full text) just to enable highlight function to load
 
-ctrans_llm = [] # Define empty list to hold CTrans LLMs for functions to run
-
-temperature: float = 0.1
-top_k: int = 3
-top_p: float = 1
-repetition_penalty: float = 1.05
-flan_alpaca_repetition_penalty: float = 1.3
-last_n_tokens: int = 64
-max_new_tokens: int = 125
-#seed: int = 42
-reset: bool = False
-stream: bool = True
-threads: int = threads
-batch_size:int = 512
-context_length:int = 4096
-gpu_layers:int = 0#5#gpu_layers For serving on Huggingface set to 0 as using free CPU instance
-sample = True
-
-@dataclass
-class GenerationConfig:
-    temperature: float = temperature
-    top_k: int = top_k
-    top_p: float = top_p
-    repetition_penalty: float = repetition_penalty
-    last_n_tokens: int = last_n_tokens
-    max_new_tokens: int = max_new_tokens
-    #seed: int = 42
-    reset: bool = reset
-    stream: bool = stream
-    threads: int = threads
-    batch_size:int = batch_size
-    context_length:int = context_length
-    gpu_layers:int = gpu_layers
-    #stop: list[str] = field(default_factory=lambda: [stop_string])
-
+model = [] # Define empty list for model functions to run
+tokenizer = [] # Define empty list for model functions to run
 
 ## Highlight text constants
 hlt_chunk_size = 15
 hlt_strat = [" ", ".", "!", "?", ":", "\n\n", "\n", ","]
-hlt_overlap = 0
+hlt_overlap = 4
 
 ## Initialise NER model ##
 ner_model = SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base-multinerd")
@@ -107,47 +67,81 @@ ner_model = SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base-mu
 # Used to pull out keywords from chat history to add to user queries behind the scenes
 kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniLM-L6-v2")
 
-## Set model type ##
-model_type = "ctrans"
 
-## Chat models ##
+if torch.cuda.is_available():
+        torch_device = "cuda"
+        gpu_layers = 5
+else: 
+    torch_device =  "cpu"
+    gpu_layers = 0
 
-if model_type == "ctrans":
-    ctrans_llm = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **asdict(GenerationConfig()))
-    #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **asdict(GenerationConfig()))
-    #ctrans_llm = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q2_K.gguf', **asdict(GenerationConfig()))
+print("Running on device:", torch_device)
+threads = 8 #torch.get_num_threads()
+print("CPU threads:", threads)
 
-if model_type == "hf":
-    # Huggingface chat model
-    #hf_checkpoint = 'jphme/phi-1_5_Wizard_Vicuna_uncensored'
-    hf_checkpoint = 'declare-lab/flan-alpaca-large'
-    
-    def create_hf_model(model_name):
+# Flan Alpaca Model parameters
+temperature: float = 0.1
+top_k: int = 3
+top_p: float = 1
+repetition_penalty: float = 1.05
+flan_alpaca_repetition_penalty: float = 1.3
+last_n_tokens: int = 64
+max_new_tokens: int = 125
+seed: int = 42
+reset: bool = False
+stream: bool = True
+threads: int = threads
+batch_size:int = 1024
+context_length:int = 4096
+sample = True
 
-        from transformers import AutoModelForSeq2SeqLM,  AutoModelForCausalLM
+# CtransGen model parameters
+gpu_layers:int = 6 #gpu_layers For serving on Huggingface set to 0 as using free CPU instance
 
-    #    model_id = model_name
-        
-        if torch_device == "cuda":
-            if "flan" in model_name:
-                model = AutoModelForSeq2SeqLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
-            elif "mpt" in model_name:
-                model = AutoModelForCausalLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto", trust_remote_code=True)
-            else:
-                model = AutoModelForCausalLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
-        else:
-            if "flan" in model_name:
-                model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-            elif "mpt" in model_name:    
-                model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
-            else: 
-                model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
+@dataclass
+class CtransInitConfig_gpu:
+    temperature: float = temperature
+    top_k: int = top_k
+    top_p: float = top_p
+    repetition_penalty: float = repetition_penalty
+    last_n_tokens: int = last_n_tokens
+    max_new_tokens: int = max_new_tokens
+    seed: int = seed
+    reset: bool = reset
+    stream: bool = stream
+    threads: int = threads
+    batch_size:int = batch_size
+    context_length:int = context_length
+    gpu_layers:int = gpu_layers
+    #stop: list[str] = field(default_factory=lambda: [stop_string])
 
-        tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = 2048)
+class CtransInitConfig_cpu:
+    temperature: float = temperature
+    top_k: int = top_k
+    top_p: float = top_p
+    repetition_penalty: float = repetition_penalty
+    last_n_tokens: int = last_n_tokens
+    max_new_tokens: int = max_new_tokens
+    seed: int = seed
+    reset: bool = reset
+    stream: bool = stream
+    threads: int = threads
+    batch_size:int = batch_size
+    context_length:int = context_length
+    gpu_layers:int = 0
+    #stop: list[str] = field(default_factory=lambda: [stop_string])
 
-        return model, tokenizer, torch_device
-
-    model, tokenizer, torch_device = create_hf_model(model_name = hf_checkpoint)
+@dataclass
+class CtransGenGenerationConfig:
+    top_k: int = top_k
+    top_p: float = top_p
+    temperature: float = temperature
+    repetition_penalty: float = repetition_penalty
+    last_n_tokens: int = last_n_tokens
+    seed: int = seed
+    batch_size:int = batch_size
+    threads: int = threads
+    reset: bool = True
 
 # Vectorstore funcs
 
@@ -179,9 +173,9 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 
     return out_message
 
-# # Prompt functions
+# Prompt functions
 
-def create_prompt_templates():    
+def base_prompt_templates(model_type = "Flan Alpaca"):    
   
     #EXAMPLE_PROMPT = PromptTemplate(
     #    template="\nCONTENT:\n\n{page_content}\n\nSOURCE: {source}\n\n",
@@ -192,7 +186,6 @@ def create_prompt_templates():
         template="{page_content}\n\n",#\n\nSOURCE: {source}\n\n",
         input_variables=["page_content"]
     )
-
 
 # The main prompt:
 
@@ -205,31 +198,168 @@ def create_prompt_templates():
 
     Response:"""
 
-    instruction_prompt_template_orca = """
-    ### System:
-    You are an AI assistant that follows instruction extremely well. Help as much as you can.
+    instruction_prompt_template_alpaca = """### Instruction:
     ### User:
     Answer the QUESTION using information from the following CONTENT.
     CONTENT: {summaries}
     QUESTION: {question}
 
+    Response:"""
+
+    instruction_prompt_template_orca = """
+    ### System:
+    You are an AI assistant that follows instruction extremely well. Help as much as you can.
+    ### User:
+    Answer the QUESTION with a short response using information from the following CONTENT.
+    CONTENT: {summaries}
+    QUESTION: {question}
+
     ### Response:"""
 
-
     instruction_prompt_mistral_orca = """<|im_start|>system\n
-You are an AI assistant that follows instruction extremely well. Help as much as you can.
-<|im_start|>user\n
-Answer the QUESTION using information from the following CONTENT.
-CONTENT: {summaries}
-QUESTION: {question}\n
-<|im_end|>"""
+    You are an AI assistant that follows instruction extremely well. Help as much as you can.
+    <|im_start|>user\n
+    Answer the QUESTION using information from the following CONTENT. Respond with short answers that directly answer the question.
+    CONTENT: {summaries}
+    QUESTION: {question}\n
+    <|im_end|>"""
 
- 
+    if model_type == "Flan Alpaca":
+        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_alpaca, input_variables=['question', 'summaries'])
+    elif model_type == "Orca Mini":
+        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_orca, input_variables=['question', 'summaries'])
 
-   
-    INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_orca, input_variables=['question', 'summaries'])
-    
     return INSTRUCTION_PROMPT, CONTENT_PROMPT
+
+def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings): # , 
+        
+        question =  inputs["question"]
+        chat_history = inputs["chat_history"]
+        
+
+        new_question_kworded = adapt_q_from_chat_history(question, chat_history, extracted_memory) # new_question_keywords, 
+        
+       
+        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 5, out_passages = 2,
+                                                                          vec_score_cut_off = 1, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
+                                                                          #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
+        
+        # Expand the found passages to the neighbouring context
+        docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=1)
+
+        if docs_keep_as_doc == []:
+            {"answer": "I'm sorry, I couldn't find a relevant answer to this question.", "sources":"I'm sorry, I couldn't find a relevant source for this question."}
+        
+ 
+        # Build up sources content to add to user display
+
+        doc_df['meta_clean'] = [f"<b>{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}</b>" for d in doc_df['metadata']]
+        doc_df['content_meta'] = doc_df['meta_clean'].astype(str) + ".<br><br>" + doc_df['page_content'].astype(str)
+
+        modified_page_content = [f" SOURCE {i+1} - {word}" for i, word in enumerate(doc_df['page_content'])]
+        docs_content_string = ''.join(modified_page_content)
+
+        sources_docs_content_string = '<br><br>'.join(doc_df['content_meta'])#.replace("  "," ")#.strip()
+     
+        instruction_prompt_out = instruction_prompt.format(question=new_question_kworded, summaries=docs_content_string)
+        
+        print('Final prompt is: ')
+        print(instruction_prompt_out)
+                
+        return instruction_prompt_out, sources_docs_content_string, new_question_kworded
+
+def create_full_prompt(user_input, history, extracted_memory, vectorstore, embeddings, model_type):
+    
+    #if chain_agent is None:
+    #    history.append((user_input, "Please click the button to submit the Huggingface API key before using the chatbot (top right)"))
+    #    return history, history, "", ""
+    print("\n==== date/time: " + str(datetime.datetime.now()) + " ====")
+    print("User input: " + user_input)
+    
+    history = history or []
+    
+    # Create instruction prompt
+    instruction_prompt, content_prompt = base_prompt_templates(model_type=model_type)
+    instruction_prompt_out, docs_content_string, new_question_kworded =\
+                generate_expanded_prompt({"question": user_input, "chat_history": history}, #vectorstore,
+                                    instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings)
+    
+  
+    history.append(user_input)
+    
+    print("Output history is:")
+    print(history)
+        
+    return history, docs_content_string, instruction_prompt_out
+
+# Chat functions
+def produce_streaming_answer_chatbot(history, full_prompt, model_type):
+    #print("Model type is: ", model_type)
+
+    if model_type == "Flan Alpaca": 
+        # Get the model and tokenizer, and tokenize the user text.
+        model_inputs = tokenizer(text=full_prompt, return_tensors="pt", return_attention_mask=False).to(torch_device) # return_attention_mask=False was added
+
+        # Start generation on a separate thread, so that we don't block the UI. The text is pulled from the streamer
+        # in the main thread. Adds timeout to the streamer to handle exceptions in the generation thread.
+        streamer = TextIteratorStreamer(tokenizer, timeout=120., skip_prompt=True, skip_special_tokens=True)
+        generate_kwargs = dict(
+            model_inputs,
+            streamer=streamer,
+            max_new_tokens=max_new_tokens,
+            do_sample=sample,
+            repetition_penalty=flan_alpaca_repetition_penalty,
+            top_p=top_p,
+            temperature=temperature,
+            top_k=top_k
+        )
+        t = Thread(target=model.generate, kwargs=generate_kwargs)
+        t.start()
+
+        # Pull the generated text from the streamer, and update the model output.
+        start = time.time()
+        NUM_TOKENS=0
+        print('-'*4+'Start Generation'+'-'*4)
+
+        history[-1][1] = ""
+        for new_text in streamer:
+            if new_text == None: new_text = ""
+            history[-1][1] += new_text
+            NUM_TOKENS+=1
+            yield history
+            
+        time_generate = time.time() - start
+        print('\n')
+        print('-'*4+'End Generation'+'-'*4)
+        print(f'Num of generated tokens: {NUM_TOKENS}')
+        print(f'Time for complete generation: {time_generate}s')
+        print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
+        print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
+
+    elif model_type == "Orca Mini":
+        tokens = model.tokenize(full_prompt)
+
+        # Pull the generated text from the streamer, and update the model output.
+        start = time.time()
+        NUM_TOKENS=0
+        print('-'*4+'Start Generation'+'-'*4)
+
+        history[-1][1] = ""
+        for new_text in model.generate(tokens, **asdict(CtransGenGenerationConfig())): #CtransGen_generate(prompt=full_prompt)#, config=CtransGenGenerationConfig()): # #top_k=top_k, temperature=temperature, repetition_penalty=repetition_penalty,
+            if new_text == None: new_text =  ""
+            history[-1][1] += model.detokenize(new_text) #new_text
+            NUM_TOKENS+=1
+            yield history
+        
+        time_generate = time.time() - start
+        print('\n')
+        print('-'*4+'End Generation'+'-'*4)
+        print(f'Num of generated tokens: {NUM_TOKENS}')
+        print(f'Time for complete generation: {time_generate}s')
+        print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
+        print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
+
+# Chat helper functions
 
 def adapt_q_from_chat_history(question, chat_history, extracted_memory, keyword_model=""):#keyword_model): # new_question_keywords, 
  
@@ -485,12 +615,6 @@ def get_expanded_passages(vectorstore, docs, width):
 
     # Step 1: Filter vstore_docs
     vstore_docs = get_docs_from_vstore(vectorstore)
-    print("Inside get_expanded_passages")
-    print("Docs:", docs)
-    print("Type of Docs:", type(docs))
-    print("Type of first element in Docs:", type(docs[0]))
-    print("Length of first tuple in Docs:", len(docs[0]))
-
     doc_sources = {doc.metadata['source'] for doc, _ in docs}
     vstore_docs = [(k, v) for k, v in vstore_docs if v.metadata.get('source') in doc_sources]
 
@@ -515,162 +639,6 @@ def get_expanded_passages(vectorstore, docs, width):
     doc_df = create_doc_df(expanded_docs)  # Assuming you've defined the 'create_doc_df' function elsewhere
 
     return expanded_docs, doc_df
-
-def create_final_prompt(inputs: Dict[str, str], instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings): # , 
-        
-        question =  inputs["question"]
-        chat_history = inputs["chat_history"]
-        
-
-        new_question_kworded = adapt_q_from_chat_history(question, chat_history, extracted_memory) # new_question_keywords, 
-        
-
-        #print("The question passed to the vector search is:")
-        #print(new_question_kworded)
-        
-        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 5, out_passages = 2,
-                                                                          vec_score_cut_off = 1, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
-                                                                          #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
-        
-        # Expand the found passages to the neighbouring context
-        docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=1)
-
-        if docs_keep_as_doc == []:
-            {"answer": "I'm sorry, I couldn't find a relevant answer to this question.", "sources":"I'm sorry, I couldn't find a relevant source for this question."}
-        
-        #new_inputs = inputs.copy()
-        #new_inputs["question"] = new_question
-        #new_inputs["chat_history"] = chat_history_str
-        
-        #print(docs_url)
-        #print(doc_df['metadata'])
-
-        # Build up sources content to add to user display
-
-        doc_df['meta_clean'] = [f"<b>{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}</b>" for d in doc_df['metadata']]
-        doc_df['content_meta'] = doc_df['meta_clean'].astype(str) + ".<br><br>" + doc_df['page_content'].astype(str)
-
-        modified_page_content = [f" SOURCE {i+1} - {word}" for i, word in enumerate(doc_df['page_content'])]
-        docs_content_string = ''.join(modified_page_content)
-
-        #docs_content_string = '<br><br>\n\n SOURCE '.join(doc_df['page_content'])#.replace("  "," ")#.strip()
-        sources_docs_content_string = '<br><br>'.join(doc_df['content_meta'])#.replace("  "," ")#.strip()
-        #sources_docs_content_tup = [(sources_docs_content,None)]
-        #print("The draft instruction prompt is:")
-        #print(instruction_prompt)
-        
-        instruction_prompt_out = instruction_prompt.format(question=new_question_kworded, summaries=docs_content_string)
-        #print("The final instruction prompt:")
-        #print(instruction_prompt_out)
-        
-        print('Final prompt is: ')
-        print(instruction_prompt_out)
-                
-        return instruction_prompt_out, sources_docs_content_string, new_question_kworded
-
-def get_history_sources_final_input_prompt(user_input, history, extracted_memory, vectorstore, embeddings):#):
-    
-    #if chain_agent is None:
-    #    history.append((user_input, "Please click the button to submit the Huggingface API key before using the chatbot (top right)"))
-    #    return history, history, "", ""
-    print("\n==== date/time: " + str(datetime.datetime.now()) + " ====")
-    print("User input: " + user_input)
-    
-    history = history or []
-    
-
-    
-    # Create instruction prompt
-    instruction_prompt, content_prompt = create_prompt_templates()
-    instruction_prompt_out, docs_content_string, new_question_kworded =\
-                create_final_prompt({"question": user_input, "chat_history": history}, #vectorstore,
-                                    instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings)
-    
-  
-    history.append(user_input)
-    
-    print("Output history is:")
-    print(history)
-
-    #print("The output prompt is:")
-    #print(instruction_prompt_out)
-    
-    return history, docs_content_string, instruction_prompt_out
-
-def highlight_found_text_single(search_text:str, full_text:str, hlt_chunk_size:int=hlt_chunk_size, hlt_strat:List=hlt_strat, hlt_overlap:int=hlt_overlap) -> str:
-    """
-    Highlights occurrences of search_text within full_text.
-    
-    Parameters:
-    - search_text (str): The text to be searched for within full_text.
-    - full_text (str): The text within which search_text occurrences will be highlighted.
-    
-    Returns:
-    - str: A string with occurrences of search_text highlighted.
-    
-    Example:
-    >>> highlight_found_text("world", "Hello, world! This is a test. Another world awaits.")
-    'Hello, <mark style="color:black;">world</mark>! This is a test. Another world awaits.'
-    """
-
-    def extract_text_from_input(text,i=0):
-        if isinstance(text, str):
-            return text.replace("  ", " ").strip()#.replace("\r", " ").replace("\n", " ")
-        elif isinstance(text, list):
-            return text[i][0].replace("  ", " ").strip()#.replace("\r", " ").replace("\n", " ")
-        else:
-            return ""
-        
-    def extract_search_text_from_input(text):
-        if isinstance(text, str):
-            return text.replace("  ", " ").strip()#.replace("\r", " ").replace("\n", " ").replace("  ", " ").strip()
-        elif isinstance(text, list):
-            return text[-1][1].replace("  ", " ").strip()#.replace("\r", " ").replace("\n", " ").replace("  ", " ").strip()
-        else:
-            return ""
-            
-    full_text = extract_text_from_input(full_text)
-    search_text = extract_search_text_from_input(search_text)
-
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=hlt_chunk_size,
-        separators=hlt_strat,
-        chunk_overlap=hlt_overlap,
-    )
-    sections = text_splitter.split_text(search_text)
-
-    #print(sections)
-
-    found_positions = {}
-    for x in sections:
-        text_start_pos = full_text.find(x)
-        
-        if text_start_pos != -1:
-            found_positions[text_start_pos] = text_start_pos + len(x)
-
-    # Combine overlapping or adjacent positions
-    sorted_starts = sorted(found_positions.keys())
-    combined_positions = []
-    if sorted_starts:
-        current_start, current_end = sorted_starts[0], found_positions[sorted_starts[0]]
-        for start in sorted_starts[1:]:
-            if start <= (current_end + 1):
-                current_end = max(current_end, found_positions[start])
-            else:
-                combined_positions.append((current_start, current_end))
-                current_start, current_end = start, found_positions[start]
-        combined_positions.append((current_start, current_end))
-
-    # Construct pos_tokens
-    pos_tokens = []
-    prev_end = 0
-    for start, end in combined_positions:
-        pos_tokens.append(full_text[prev_end:start]) # ((full_text[prev_end:start], None))
-        pos_tokens.append('<mark style="color:black;">' + full_text[start:end] + '</mark>')# ("<mark>" + full_text[start:end] + "</mark>",'found')
-        prev_end = end
-    pos_tokens.append(full_text[prev_end:])
-
-    return "".join(pos_tokens)
 
 def highlight_found_text(search_text: str, full_text: str, hlt_chunk_size:int=hlt_chunk_size, hlt_strat:List=hlt_strat, hlt_overlap:int=hlt_overlap) -> str:
     """
@@ -742,110 +710,14 @@ def highlight_found_text(search_text: str, full_text: str, hlt_chunk_size:int=hl
     pos_tokens = []
     prev_end = 0
     for start, end in combined_positions:
-        pos_tokens.append(full_text[prev_end:start])
-        pos_tokens.append('<mark style="color:black;">' + full_text[start:end] + '</mark>')
-        prev_end = end
+        if end-start > 15: # Only combine if there is a significant amount of matched text. Avoids picking up single words like 'and' etc.
+            pos_tokens.append(full_text[prev_end:start])
+            pos_tokens.append('<mark style="color:black;">' + full_text[start:end] + '</mark>')
+            prev_end = end
     pos_tokens.append(full_text[prev_end:])
 
     return "".join(pos_tokens)
 
-# # Chat functions
-def produce_streaming_answer_chatbot_hf(history, full_prompt): 
-    
-    #print("The question is: ")
-    #print(full_prompt)
-    
-    # Get the model and tokenizer, and tokenize the user text.
-    model_inputs = tokenizer(text=full_prompt, return_tensors="pt", return_attention_mask=False).to(torch_device) # return_attention_mask=False was added
-
-    # Start generation on a separate thread, so that we don't block the UI. The text is pulled from the streamer
-    # in the main thread. Adds timeout to the streamer to handle exceptions in the generation thread.
-    streamer = TextIteratorStreamer(tokenizer, timeout=120., skip_prompt=True, skip_special_tokens=True)
-    generate_kwargs = dict(
-        model_inputs,
-        streamer=streamer,
-        max_new_tokens=max_new_tokens,
-        do_sample=sample,
-        repetition_penalty=flan_alpaca_repetition_penalty,
-        top_p=top_p,
-        temperature=temperature,
-        top_k=top_k
-    )
-    t = Thread(target=model.generate, kwargs=generate_kwargs)
-    t.start()
-
-    # Pull the generated text from the streamer, and update the model output.
-    import time
-    start = time.time()
-    NUM_TOKENS=0
-    print('-'*4+'Start Generation'+'-'*4)
-
-    history[-1][1] = ""
-    for new_text in streamer:
-        if new_text == None: new_text = ""
-        history[-1][1] += new_text
-        NUM_TOKENS+=1
-        yield history
-        
-    time_generate = time.time() - start
-    print('\n')
-    print('-'*4+'End Generation'+'-'*4)
-    print(f'Num of generated tokens: {NUM_TOKENS}')
-    print(f'Time for complete generation: {time_generate}s')
-    print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
-    print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
-
-def produce_streaming_answer_chatbot_ctrans(history, full_prompt): 
-    
-    print("The question is: ")
-    print(full_prompt)
-
-    tokens = ctrans_llm.tokenize(full_prompt)
-    
-    #config = GenerationConfig(reset=True)
-
-    # Pull the generated text from the streamer, and update the model output.
-    import time
-    start = time.time()
-    NUM_TOKENS=0
-    print('-'*4+'Start Generation'+'-'*4)
-
-    history[-1][1] = ""
-    for new_text in ctrans_llm.generate(tokens, top_k=top_k, temperature=temperature, repetition_penalty=repetition_penalty): #ctrans_generate(prompt=tokens, config=config):
-        if new_text == None: new_text =  ""
-        history[-1][1] += ctrans_llm.detokenize(new_text) #new_text
-        NUM_TOKENS+=1
-        yield history
-    
-    time_generate = time.time() - start
-    print('\n')
-    print('-'*4+'End Generation'+'-'*4)
-    print(f'Num of generated tokens: {NUM_TOKENS}')
-    print(f'Time for complete generation: {time_generate}s')
-    print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
-    print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
-
-
-def ctrans_generate(
-    prompt: str,
-    llm=ctrans_llm,
-    config: GenerationConfig = GenerationConfig(),
-):
-    """Run model inference, will return a Generator if streaming is true."""
-
-    return llm(
-        prompt,
-        **asdict(config),
-    )
-
-def turn_off_interactivity(user_message, history):
-        return gr.update(value="", interactive=False), history + [[user_message, None]]
-
-def update_message(dropdown_value):
-        return gr.Textbox.update(value=dropdown_value)
-
-def hide_block():
-        return gr.Radio.update(visible=False)
 
 # # Chat history functions
 
@@ -922,6 +794,8 @@ def add_inputs_answer_to_history(user_message, history, current_topic):
     
     
     return history, extracted_memory
+
+# Keyword functions
 
 def remove_q_stopwords(question): # Remove stopwords from question. Not used at the moment 
     # Prepare keywords from question by removing stopwords
@@ -1003,4 +877,51 @@ def keybert_keywords(text, n, kw_model):
     keywords_list = [item[0] for item in keywords_text]
 
     return keywords_list
+    
+# Gradio functions
+def turn_off_interactivity(user_message, history):
+        return gr.update(value="", interactive=False), history + [[user_message, None]]
 
+def restore_interactivity():
+        return gr.update(interactive=True)
+
+def update_message(dropdown_value):
+        return gr.Textbox.update(value=dropdown_value)
+
+def hide_block():
+        return gr.Radio.update(visible=False)
+    
+# Vote function
+
+def vote(data: gr.LikeData, chat_history, instruction_prompt_out, model_type):
+    import os
+    import pandas as pd
+
+    chat_history_last = str(str(chat_history[-1][0]) + " - " + str(chat_history[-1][1]))
+
+    response_df = pd.DataFrame(data={"thumbs_up":data.liked,
+                                        "chosen_response":data.value,
+                                          "input_prompt":instruction_prompt_out,
+                                          "chat_history":chat_history_last,
+                                          "model_type": model_type,
+                                          "date_time": pd.Timestamp.now()}, index=[0])
+
+    if data.liked:
+        print("You upvoted this response: " + data.value)
+        
+        if os.path.isfile("thumbs_up_data.csv"):
+             existing_thumbs_up_df = pd.read_csv("thumbs_up_data.csv")
+             thumbs_up_df_concat = pd.concat([existing_thumbs_up_df, response_df], ignore_index=True).drop("Unnamed: 0",axis=1, errors="ignore")
+             thumbs_up_df_concat.to_csv("thumbs_up_data.csv")
+        else:
+            response_df.to_csv("thumbs_up_data.csv")
+
+    else:
+        print("You downvoted this response: " + data.value)
+
+        if os.path.isfile("thumbs_down_data.csv"):
+             existing_thumbs_down_df = pd.read_csv("thumbs_down_data.csv")
+             thumbs_down_df_concat = pd.concat([existing_thumbs_down_df, response_df], ignore_index=True).drop("Unnamed: 0",axis=1, errors="ignore")
+             thumbs_down_df_concat.to_csv("thumbs_down_data.csv")
+        else:
+            response_df.to_csv("thumbs_down_data.csv")            
