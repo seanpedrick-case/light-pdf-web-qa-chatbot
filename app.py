@@ -5,7 +5,7 @@ import os
 
 # Need to overwrite version of gradio present in Huggingface spaces as it doesn't have like buttons/avatars (Oct 2023)
 #os.system("pip uninstall -y gradio")
-os.system("pip install gradio==3.47.1")
+os.system("pip install gradio==3.42.0")
 
 from typing import TypeVar
 from langchain.embeddings import HuggingFaceEmbeddings, HuggingFaceInstructEmbeddings
