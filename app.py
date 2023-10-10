@@ -2,21 +2,22 @@
 
 # +
 import os
-os.system("pip uninstall -y gradio")
-os.system("pip install gradio==3.42.0")
+
+# Need to overwrite version of gradio present in Huggingface spaces as it doesn't have like buttons/avatars (Oct 2023)
+#os.system("pip uninstall -y gradio")
+os.system("pip install gradio==3.47.1")
 
 from typing import TypeVar
 from langchain.embeddings import HuggingFaceEmbeddings, HuggingFaceInstructEmbeddings
 from langchain.vectorstores import FAISS
 import gradio as gr
 
-from transformers import AutoTokenizer#, pipeline, TextIteratorStreamer
+from transformers import AutoTokenizer
 from dataclasses import asdict, dataclass
 
 # Alternative model sources
-from ctransformers import AutoModelForCausalLM#, AutoTokenizer
+from ctransformers import AutoModelForCausalLM
 
-#PandasDataFrame: type[pd.core.frame.DataFrame]
 PandasDataFrame = TypeVar('pd.core.frame.DataFrame')
 
 # Disable cuda devices if necessary
@@ -68,12 +69,14 @@ import chatfuncs.chatfuncs as chatf
 chatf.embeddings = load_embeddings(embeddings_name)
 chatf.vectorstore = get_faiss_store(faiss_vstore_folder="faiss_embedding",embeddings=globals()["embeddings"])
 
-model_type = "Flan Alpaca"
 
 
-def load_model(model_type, CtransInitConfig_gpu=chatf.CtransInitConfig_gpu, CtransInitConfig_cpu=chatf.CtransInitConfig_cpu, torch_device=chatf.torch_device):
+def load_model(model_type, gpu_layers, CtransInitConfig_gpu=chatf.CtransInitConfig_gpu, CtransInitConfig_cpu=chatf.CtransInitConfig_cpu, torch_device=chatf.torch_device):
     print("Loading model")
     if model_type == "Orca Mini":
+        CtransInitConfig_gpu.gpu_layers = gpu_layers
+        CtransInitConfig_cpu.gpu_layers = gpu_layers
+
         try:
             model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **asdict(CtransInitConfig_gpu()))
         except:
@@ -88,14 +91,12 @@ def load_model(model_type, CtransInitConfig_gpu=chatf.CtransInitConfig_gpu, Ctra
         def create_hf_model(model_name):
 
             from transformers import AutoModelForSeq2SeqLM,  AutoModelForCausalLM
-
-        #    model_id = model_name
             
             if torch_device == "cuda":
                 if "flan" in model_name:
-                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
+                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")
                 else:
-                    model = AutoModelForCausalLM.from_pretrained(model_name, load_in_8bit=True, device_map="auto")
+                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
             else:
                 if "flan" in model_name:
                     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
@@ -115,7 +116,13 @@ def load_model(model_type, CtransInitConfig_gpu=chatf.CtransInitConfig_gpu, Ctra
     print("Finished loading model: ", model_type)
     return model_type
 
-load_model(model_type, chatf.CtransInitConfig_gpu, chatf.CtransInitConfig_cpu, chatf.torch_device)
+# Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
+model_type = "Orca Mini"
+
+load_model(model_type, chatf.gpu_layers, chatf.CtransInitConfig_gpu, chatf.CtransInitConfig_cpu, chatf.torch_device)
+
+model_type = "Flan Alpaca"
+load_model(model_type, 0, chatf.CtransInitConfig_gpu, chatf.CtransInitConfig_cpu, chatf.torch_device)
 
 def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 
@@ -153,7 +160,7 @@ with block:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown("Chat with PDF or web page documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Orca Mini), can reason a little better, but is much slower (See advanced tab, temporarily disabled).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Likes and dislike responses will be saved to disk to improve the model. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+    gr.Markdown("Chat with PDF or web page documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Orca Mini), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Likes and dislike responses will be saved to disk to improve the model. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
 
     current_source = gr.Textbox(label="Current data source that is loaded into the app", value="Lambeth_2030-Our_Future_Our_Lambeth.pdf")
 
@@ -198,8 +205,9 @@ with block:
         
         ingest_embed_out = gr.Textbox(label="File/webpage preparation progress")
 
-    with gr.Tab("Advanced features (Currently disabled)"):
+    with gr.Tab("Advanced features"):
         model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca", choices = ["Flan Alpaca", "Orca Mini"])
+        gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (please don't change if you don't know what you're doing).", value=0, minimum=0, maximum=6, step = 1)
 
     gr.HTML(
         "<center>This app is based on the models Flan Alpaca and Orca Mini. It powered by Gradio, Transformers, Ctransformers, and Langchain.</a></center>"
@@ -207,7 +215,7 @@ with block:
 
     examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
 
-    #model_choice.change(fn=load_model, inputs=[model_choice], outputs = [model_type_state])
+    model_choice.change(fn=load_model, inputs=[model_choice, gpu_layer_choice], outputs = [model_type_state])
 
     # Load in a pdf
     load_pdf_click = load_pdf.click(ing.parse_file, inputs=[in_pdf], outputs=[ingest_text, current_source]).\

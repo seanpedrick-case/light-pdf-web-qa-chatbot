@@ -9,10 +9,9 @@ import numpy as np
 # Model packages
 import torch
 from threading import Thread
-from transformers import AutoTokenizer, pipeline, TextIteratorStreamer
+from transformers import pipeline, TextIteratorStreamer
 
 # Alternative model sources
-from ctransformers import AutoModelForCausalLM#, AutoTokenizer
 from dataclasses import asdict, dataclass
 
 # Langchain functions
@@ -69,8 +68,8 @@ kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniL
 
 
 if torch.cuda.is_available():
-        torch_device = "cuda"
-        gpu_layers = 5
+    torch_device = "cuda"
+    gpu_layers = 6
 else: 
     torch_device =  "cpu"
     gpu_layers = 0
@@ -95,8 +94,6 @@ batch_size:int = 1024
 context_length:int = 4096
 sample = True
 
-# CtransGen model parameters
-gpu_layers:int = 6 #gpu_layers For serving on Huggingface set to 0 as using free CPU instance
 
 @dataclass
 class CtransInitConfig_gpu:
