@@ -2,7 +2,6 @@
 
 # +
 import os
-import copy
 
 # Need to overwrite version of gradio present in Huggingface spaces as it doesn't have like buttons/avatars (Oct 2023)
 #os.system("pip uninstall -y gradio")

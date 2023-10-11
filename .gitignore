@@ -1,5 +1,7 @@
 *.pyc
 *.ipynb
 *.pdf
-*/build
-*/dist
+*.spec
+*.toc
+build/*
+dist/*
