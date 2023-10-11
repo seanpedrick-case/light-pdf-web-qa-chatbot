@@ -83,7 +83,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     if model_type == "Orca Mini":
 
         gpu_config.update_gpu(gpu_layers)
-        cpu_config.update_gpu(gpu_layers)
+        cpu_config.update_gpu(0)
 
         print("Loading with", cpu_config.gpu_layers, "model layers sent to GPU.")
 
@@ -91,9 +91,9 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
         print(vars(cpu_config))
 
         try:
-            model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
+            model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
         except:
-            model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(gpu_config)) #**asdict(CtransRunConfig_gpu())
+            model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
 
         tokenizer = []
 
@@ -220,7 +220,7 @@ with block:
 
     with gr.Tab("Advanced features"):
         model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca", choices = ["Flan Alpaca", "Orca Mini"])
-        gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (please don't change if you don't know what you're doing).", value=0, minimum=0, maximum=6, step = 1, scale = 0)
+        gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (please don't change if you don't know what you're doing).", value=0, minimum=0, maximum=6, step = 1, scale = 0, visible=False)
 
     gr.HTML(
         "<center>This app is based on the models Flan Alpaca and Orca Mini. It powered by Gradio, Transformers, Ctransformers, and Langchain.</a></center>"

@@ -3,5 +3,6 @@
 *.pdf
 *.spec
 *.toc
+bootstrapper.py
 build/*
 dist/*
