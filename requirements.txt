@@ -6,7 +6,6 @@ transformers
 torch
 sentence_transformers
 faiss-cpu
-bitsandbytes
 pypdf
 python-docx
 ctransformers[cuda]

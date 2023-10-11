@@ -2,6 +2,7 @@
 
 # +
 import os
+import copy
 
 # Need to overwrite version of gradio present in Huggingface spaces as it doesn't have like buttons/avatars (Oct 2023)
 #os.system("pip uninstall -y gradio")
@@ -69,18 +70,31 @@ import chatfuncs.chatfuncs as chatf
 chatf.embeddings = load_embeddings(embeddings_name)
 chatf.vectorstore = get_faiss_store(faiss_vstore_folder="faiss_embedding",embeddings=globals()["embeddings"])
 
-
-
-def load_model(model_type, gpu_layers, CtransInitConfig_gpu=chatf.CtransInitConfig_gpu, CtransInitConfig_cpu=chatf.CtransInitConfig_cpu, torch_device=chatf.torch_device):
+def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_device=None):
     print("Loading model")
+
+    # Default values inside the function
+    if gpu_config is None:
+        gpu_config = chatf.gpu_config
+    if cpu_config is None:
+        cpu_config = chatf.cpu_config
+    if torch_device is None:
+        torch_device = chatf.torch_device
+
     if model_type == "Orca Mini":
-        CtransInitConfig_gpu.gpu_layers = gpu_layers
-        CtransInitConfig_cpu.gpu_layers = gpu_layers
+
+        gpu_config.update_gpu(gpu_layers)
+        cpu_config.update_gpu(gpu_layers)
+
+        print("Loading with", cpu_config.gpu_layers, "model layers sent to GPU.")
+
+        print(vars(gpu_config))
+        print(vars(cpu_config))
 
         try:
-            model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **asdict(CtransInitConfig_gpu()))
+            model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
         except:
-            model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **asdict(CtransInitConfig_cpu()))
+            model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(gpu_config)) #**asdict(CtransRunConfig_gpu())
 
         tokenizer = []
 
@@ -119,10 +133,10 @@ def load_model(model_type, gpu_layers, CtransInitConfig_gpu=chatf.CtransInitConf
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
 model_type = "Orca Mini"
 
-load_model(model_type, chatf.gpu_layers, chatf.CtransInitConfig_gpu, chatf.CtransInitConfig_cpu, chatf.torch_device)
+load_model(model_type, chatf.gpu_layers, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
 model_type = "Flan Alpaca"
-load_model(model_type, 0, chatf.CtransInitConfig_gpu, chatf.CtransInitConfig_cpu, chatf.torch_device)
+load_model(model_type, 0, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
 def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 
@@ -207,7 +221,7 @@ with block:
 
     with gr.Tab("Advanced features"):
         model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca", choices = ["Flan Alpaca", "Orca Mini"])
-        gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (please don't change if you don't know what you're doing).", value=0, minimum=0, maximum=6, step = 1)
+        gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (please don't change if you don't know what you're doing).", value=0, minimum=0, maximum=6, step = 1, scale = 0)
 
     gr.HTML(
         "<center>This app is based on the models Flan Alpaca and Orca Mini. It powered by Gradio, Transformers, Ctransformers, and Langchain.</a></center>"

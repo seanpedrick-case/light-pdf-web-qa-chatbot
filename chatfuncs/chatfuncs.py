@@ -95,38 +95,34 @@ context_length:int = 4096
 sample = True
 
 
-@dataclass
 class CtransInitConfig_gpu:
-    temperature: float = temperature
-    top_k: int = top_k
-    top_p: float = top_p
-    repetition_penalty: float = repetition_penalty
-    last_n_tokens: int = last_n_tokens
-    max_new_tokens: int = max_new_tokens
-    seed: int = seed
-    reset: bool = reset
-    stream: bool = stream
-    threads: int = threads
-    batch_size:int = batch_size
-    context_length:int = context_length
-    gpu_layers:int = gpu_layers
-    #stop: list[str] = field(default_factory=lambda: [stop_string])
+    def __init__(self, temperature=0.1, top_k=3, top_p=1, repetition_penalty=1.05, last_n_tokens=64, max_new_tokens=125, seed=42, reset=False, stream=True, threads=None, batch_size=1024, context_length=4096, gpu_layers=None):
+        self.temperature = temperature
+        self.top_k = top_k
+        self.top_p = top_p
+        self.repetition_penalty = repetition_penalty
+        self.last_n_tokens = last_n_tokens
+        self.max_new_tokens = max_new_tokens
+        self.seed = seed
+        self.reset = reset
+        self.stream = stream
+        self.threads = threads
+        self.batch_size = batch_size
+        self.context_length = context_length
+        self.gpu_layers = gpu_layers
+        # self.stop: list[str] = field(default_factory=lambda: [stop_string])
 
-class CtransInitConfig_cpu:
-    temperature: float = temperature
-    top_k: int = top_k
-    top_p: float = top_p
-    repetition_penalty: float = repetition_penalty
-    last_n_tokens: int = last_n_tokens
-    max_new_tokens: int = max_new_tokens
-    seed: int = seed
-    reset: bool = reset
-    stream: bool = stream
-    threads: int = threads
-    batch_size:int = batch_size
-    context_length:int = context_length
-    gpu_layers:int = 0
-    #stop: list[str] = field(default_factory=lambda: [stop_string])
+    def update_gpu(self, new_value):
+        self.gpu_layers = new_value
+
+class CtransInitConfig_cpu(CtransInitConfig_gpu):
+    def __init__(self):
+        super().__init__()
+        self.gpu_layers = 0
+
+gpu_config = CtransInitConfig_gpu()
+cpu_config = CtransInitConfig_cpu()
+
 
 @dataclass
 class CtransGenGenerationConfig:
