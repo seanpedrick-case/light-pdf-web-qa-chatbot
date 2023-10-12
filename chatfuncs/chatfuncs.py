@@ -69,7 +69,7 @@ kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniL
 
 if torch.cuda.is_available():
     torch_device = "cuda"
-    gpu_layers = 6
+    gpu_layers = 0
 else: 
     torch_device =  "cpu"
     gpu_layers = 0
@@ -82,25 +82,38 @@ print("CPU threads:", threads)
 temperature: float = 0.1
 top_k: int = 3
 top_p: float = 1
-repetition_penalty: float = 1.05
+repetition_penalty: float = 1.3
 flan_alpaca_repetition_penalty: float = 1.3
+tinyllama_repetition_penalty: float = 1.5
 last_n_tokens: int = 64
-max_new_tokens: int = 125
+max_new_tokens: int = 512
 seed: int = 42
 reset: bool = False
 stream: bool = True
 threads: int = threads
-batch_size:int = 1024
-context_length:int = 4096
+batch_size:int = 256
+context_length:int = 2048
 sample = True
 
 
 class CtransInitConfig_gpu:
-    def __init__(self, temperature=0.1, top_k=3, top_p=1, repetition_penalty=1.05, last_n_tokens=64, max_new_tokens=125, seed=42, reset=False, stream=True, threads=None, batch_size=1024, context_length=4096, gpu_layers=None):
+    def __init__(self, temperature=temperature,
+                 top_k=top_k,
+                 top_p=top_p,
+                 repetition_penalty=repetition_penalty,
+                 last_n_tokens=last_n_tokens,
+                 max_new_tokens=max_new_tokens,
+                 seed=seed,
+                 reset=reset,
+                 stream=stream,
+                 threads=threads,
+                 batch_size=batch_size,
+                 context_length=context_length,
+                 gpu_layers=gpu_layers):
         self.temperature = temperature
         self.top_k = top_k
         self.top_p = top_p
-        self.repetition_penalty = repetition_penalty
+        self.repetition_penalty = repetition_penalty# repetition_penalty
         self.last_n_tokens = last_n_tokens
         self.max_new_tokens = max_new_tokens
         self.seed = seed
@@ -124,17 +137,38 @@ gpu_config = CtransInitConfig_gpu()
 cpu_config = CtransInitConfig_cpu()
 
 
-@dataclass
+#@dataclass
+#class CtransGenGenerationConfig:
+#    top_k: int = top_k
+#    top_p: float = top_p
+#    temperature: float = temperature
+#    repetition_penalty: float = tinyllama_repetition_penalty
+#    last_n_tokens: int = last_n_tokens
+#    seed: int = seed
+#    batch_size:int = batch_size
+#     threads: int = threads
+#     reset: bool = True
+
 class CtransGenGenerationConfig:
-    top_k: int = top_k
-    top_p: float = top_p
-    temperature: float = temperature
-    repetition_penalty: float = repetition_penalty
-    last_n_tokens: int = last_n_tokens
-    seed: int = seed
-    batch_size:int = batch_size
-    threads: int = threads
-    reset: bool = True
+    def __init__(self, temperature=temperature,
+                 top_k=top_k,
+                 top_p=top_p,
+                 repetition_penalty=repetition_penalty,
+                 last_n_tokens=last_n_tokens,
+                 seed=seed,
+                 threads=threads,
+                 batch_size=batch_size,
+                 reset=True
+                 ):
+        self.temperature = temperature
+        self.top_k = top_k
+        self.top_p = top_p
+        self.repetition_penalty = repetition_penalty# repetition_penalty
+        self.last_n_tokens = last_n_tokens
+        self.seed = seed
+        self.threads = threads
+        self.batch_size = batch_size
+        self.reset = reset
 
 # Vectorstore funcs
 
@@ -199,6 +233,12 @@ def base_prompt_templates(model_type = "Flan Alpaca"):
 
     Response:"""
 
+    instruction_prompt_template_sheared_llama = """Answer the QUESTION using information from the following CONTENT.
+    CONTENT: {summaries}
+    QUESTION: {question}
+
+    Answer:"""
+
     instruction_prompt_template_orca = """
     ### System:
     You are an AI assistant that follows instruction extremely well. Help as much as you can.
@@ -215,7 +255,15 @@ def base_prompt_templates(model_type = "Flan Alpaca"):
     Answer the QUESTION using information from the following CONTENT. Respond with short answers that directly answer the question.
     CONTENT: {summaries}
     QUESTION: {question}\n
-    <|im_end|>"""
+    Answer:<|im_end|>"""
+
+    instruction_prompt_tinyllama_orca = """<|im_start|>system\n
+    You are an AI assistant that follows instruction extremely well. Help as much as you can.
+    <|im_start|>user\n
+    Answer the QUESTION using information from the following CONTENT. Only quote text that directly answers the question and nothing more. If you can't find an answer to the question, respond with "Sorry, I can't find an answer to that question.".
+    CONTENT: {summaries}
+    QUESTION: {question}\n
+    Answer:<|im_end|>"""
 
     if model_type == "Flan Alpaca":
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_alpaca, input_variables=['question', 'summaries'])
@@ -233,12 +281,12 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
         new_question_kworded = adapt_q_from_chat_history(question, chat_history, extracted_memory) # new_question_keywords, 
         
        
-        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 5, out_passages = 2,
+        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 5, out_passages = 1,
                                                                           vec_score_cut_off = 1, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
                                                                           #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
         
         # Expand the found passages to the neighbouring context
-        docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=1)
+        docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=3)
 
         if docs_keep_as_doc == []:
             {"answer": "I'm sorry, I couldn't find a relevant answer to this question.", "sources":"I'm sorry, I couldn't find a relevant source for this question."}
@@ -301,7 +349,7 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type):
             streamer=streamer,
             max_new_tokens=max_new_tokens,
             do_sample=sample,
-            repetition_penalty=flan_alpaca_repetition_penalty,
+            repetition_penalty=repetition_penalty,
             top_p=top_p,
             temperature=temperature,
             top_k=top_k
@@ -332,13 +380,15 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type):
     elif model_type == "Orca Mini":
         tokens = model.tokenize(full_prompt)
 
+        gen_config = CtransGenGenerationConfig()
+
         # Pull the generated text from the streamer, and update the model output.
         start = time.time()
         NUM_TOKENS=0
         print('-'*4+'Start Generation'+'-'*4)
 
         history[-1][1] = ""
-        for new_text in model.generate(tokens, **asdict(CtransGenGenerationConfig())): #CtransGen_generate(prompt=full_prompt)#, config=CtransGenGenerationConfig()): # #top_k=top_k, temperature=temperature, repetition_penalty=repetition_penalty,
+        for new_text in model.generate(tokens, **vars(gen_config)): #CtransGen_generate(prompt=full_prompt)#, config=CtransGenGenerationConfig()): # #top_k=top_k, temperature=temperature, repetition_penalty=repetition_penalty,
             if new_text == None: new_text =  ""
             history[-1][1] += model.detokenize(new_text) #new_text
             NUM_TOKENS+=1

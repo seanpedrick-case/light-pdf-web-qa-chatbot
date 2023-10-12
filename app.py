@@ -13,7 +13,6 @@ from langchain.vectorstores import FAISS
 import gradio as gr
 
 from transformers import AutoTokenizer
-from dataclasses import asdict, dataclass
 
 # Alternative model sources
 from ctransformers import AutoModelForCausalLM
@@ -83,7 +82,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     if model_type == "Orca Mini":
 
         gpu_config.update_gpu(gpu_layers)
-        cpu_config.update_gpu(0)
+        cpu_config.update_gpu(gpu_layers)
 
         print("Loading with", cpu_config.gpu_layers, "model layers sent to GPU.")
 
@@ -92,8 +91,13 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
 
         try:
             model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Sheared-LLaMA-1.3B-gguf', model_type='llama', model_file='q8_0-sheared-llama-1.3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            #model = AutoModelForCausalLM.from_pretrained('TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF', model_type='llama', model_file='tinyllama-1.1b-1t-openorca.Q8_0.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
         except:
             model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
+            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Sheared-LLaMA-1.3B-gguf', model_type='llama', model_file='q8_0-sheared-llama-1.3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            #model = AutoModelForCausalLM.from_pretrained('TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF', model_type='llama', model_file='tinyllama-1.1b-1t-openorca.Q8_0.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
+
 
         tokenizer = []
 
@@ -126,8 +130,10 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     chatf.tokenizer = tokenizer
     chatf.model_type = model_type
 
-    print("Finished loading model: ", model_type)
-    return model_type
+    load_confirmation = "Finished loading model: " + model_type
+
+    print(load_confirmation)
+    return model_type, load_confirmation
 
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
 model_type = "Orca Mini"
@@ -173,7 +179,7 @@ with block:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown("Chat with PDF or web page documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Orca Mini), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Likes and dislike responses will be saved to disk to improve the model. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+    gr.Markdown("Chat with PDF or web page documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Orca Mini), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
 
     current_source = gr.Textbox(label="Current data source that is loaded into the app", value="Lambeth_2030-Our_Future_Our_Lambeth.pdf")
 
@@ -181,8 +187,8 @@ with block:
 
         with gr.Row():
             chat_height = 500
-            chatbot = gr.Chatbot(height=chat_height, avatar_images=('user.jfif', 'bot.jpg'),bubble_full_width = False)
-            sources = gr.HTML(value = "Source paragraphs where I looked for answers will appear here", height=chat_height)
+            chatbot = gr.Chatbot(height=chat_height, avatar_images=('user.jfif', 'bot.jpg'),bubble_full_width = False, scale = 1)
+            sources = gr.HTML(value = "Source paragraphs where I looked for answers will appear here", height=chat_height, scale = 2)
 
         with gr.Row():
             message = gr.Textbox(
@@ -191,7 +197,8 @@ with block:
             )     
         with gr.Row():
             submit = gr.Button(value="Send message", variant="secondary", scale = 1)
-            clear = gr.Button(value="Clear chat", variant="secondary", scale=0)  
+            clear = gr.Button(value="Clear chat", variant="secondary", scale=0) 
+            stop = gr.Button(value="Stop generating", variant="secondary", scale=0)
 
         examples_set = gr.Radio(label="Examples for the Lambeth Borough Plan",
             #value = "What were the five pillars of the previous borough plan?",
@@ -220,7 +227,10 @@ with block:
 
     with gr.Tab("Advanced features"):
         model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca", choices = ["Flan Alpaca", "Orca Mini"])
-        gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (please don't change if you don't know what you're doing).", value=0, minimum=0, maximum=6, step = 1, scale = 0, visible=False)
+        with gr.Row():
+            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=6, step = 1, visible=True)
+            change_model_button = gr.Button(value="Load model", scale=0)
+        load_text = gr.Text(label="Load status")
 
     gr.HTML(
         "<center>This app is based on the models Flan Alpaca and Orca Mini. It powered by Gradio, Transformers, Ctransformers, and Langchain.</a></center>"
@@ -228,7 +238,11 @@ with block:
 
     examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
 
-    model_choice.change(fn=load_model, inputs=[model_choice, gpu_layer_choice], outputs = [model_type_state])
+    change_model_button.click(fn=chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
+    then(fn=load_model, inputs=[model_choice, gpu_layer_choice], outputs = [model_type_state, load_text]).\
+    then(lambda: chatf.restore_interactivity(), None, [message], queue=False).\
+    then(chatf.clear_chat, inputs=[chat_history_state, sources, message, current_topic], outputs=[chat_history_state, sources, message, current_topic]).\
+    then(lambda: None, None, chatbot, queue=False)
 
     # Load in a pdf
     load_pdf_click = load_pdf.click(ing.parse_file, inputs=[in_pdf], outputs=[ingest_text, current_source]).\
@@ -259,6 +273,9 @@ with block:
                 then(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
                 then(lambda: chatf.restore_interactivity(), None, [message], queue=False)
     
+    # Stop box
+    stop.click(fn=None, inputs=None, outputs=None, cancels=[response_click, response_enter])
+
     # Clear box
     clear.click(chatf.clear_chat, inputs=[chat_history_state, sources, message, current_topic], outputs=[chat_history_state, sources, message, current_topic])
     clear.click(lambda: None, None, chatbot, queue=False)
