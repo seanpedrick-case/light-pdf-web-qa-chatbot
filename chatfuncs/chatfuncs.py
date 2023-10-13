@@ -12,7 +12,7 @@ from threading import Thread
 from transformers import pipeline, TextIteratorStreamer
 
 # Alternative model sources
-from dataclasses import asdict, dataclass
+#from dataclasses import asdict, dataclass
 
 # Langchain functions
 from langchain.prompts import PromptTemplate
@@ -55,8 +55,8 @@ model = [] # Define empty list for model functions to run
 tokenizer = [] # Define empty list for model functions to run
 
 ## Highlight text constants
-hlt_chunk_size = 15
-hlt_strat = [" ", ".", "!", "?", ":", "\n\n", "\n", ","]
+hlt_chunk_size = 12
+hlt_strat = [" ", ". ", "! ", "? ", ": ", "\n\n", "\n", ", "]
 hlt_overlap = 4
 
 ## Initialise NER model ##
@@ -217,58 +217,106 @@ def base_prompt_templates(model_type = "Flan Alpaca"):
 # The main prompt:
 
     instruction_prompt_template_alpaca_quote = """### Instruction:
-    Quote directly from the SOURCE below that best answers the QUESTION. Only quote full sentences in the correct order. If you cannot find an answer, start your response with "My best guess is: ".
+Quote directly from the SOURCE below that best answers the QUESTION. Only quote full sentences in the correct order. If you cannot find an answer, start your response with "My best guess is: ".
     
-    CONTENT: {summaries}
-    
-    QUESTION: {question}
+CONTENT: {summaries}   
+QUESTION: {question}
 
-    Response:"""
+Response:"""
 
     instruction_prompt_template_alpaca = """### Instruction:
-    ### User:
-    Answer the QUESTION using information from the following CONTENT.
-    CONTENT: {summaries}
-    QUESTION: {question}
+### User:
+Answer the QUESTION using information from the following CONTENT.
+CONTENT: {summaries}
+QUESTION: {question}
 
-    Response:"""
+Response:"""
 
-    instruction_prompt_template_sheared_llama = """Answer the QUESTION using information from the following CONTENT.
-    CONTENT: {summaries}
-    QUESTION: {question}
+    instruction_prompt_template_openllama = """Answer the QUESTION using information from the following CONTENT.
+QUESTION - {question}
+CONTENT - {summaries}    
+Answer:"""
 
-    Answer:"""
+    instruction_prompt_template_platypus = """### Instruction:
+Answer the QUESTION using information from the following CONTENT.
+CONTENT: {summaries}
+QUESTION: {question}   
+### Response:"""
+
+    instruction_prompt_template_wizard_orca_quote = """### HUMAN:
+Quote text from the CONTENT to answer the QUESTION below.
+CONTENT - {summaries}  
+QUESTION - {question}
+### RESPONSE:
+"""
+
+    instruction_prompt_template_wizard_orca = """### HUMAN:
+Answer the QUESTION below based on the CONTENT. Only refer to CONTENT that directly answers the question.
+CONTENT - {summaries}
+QUESTION - {question}
+### RESPONSE:
+"""
+
 
     instruction_prompt_template_orca = """
-    ### System:
-    You are an AI assistant that follows instruction extremely well. Help as much as you can.
-    ### User:
-    Answer the QUESTION with a short response using information from the following CONTENT.
-    CONTENT: {summaries}
-    QUESTION: {question}
+### System:
+You are an AI assistant that follows instruction extremely well. Help as much as you can.
+### User:
+Answer the QUESTION with a short response using information from the following CONTENT.
+QUESTION: {question}
+CONTENT: {summaries}
 
-    ### Response:"""
+### Response:"""
+
+    instruction_prompt_template_orca_quote = """
+### System:
+You are an AI assistant that follows instruction extremely well. Help as much as you can.
+### User:
+Quote text from the CONTENT to answer the QUESTION below.
+QUESTION: {question}
+CONTENT: {summaries}  
+### Response:
+"""
+
+    instruction_prompt_template_orca_rev = """
+### System:
+You are an AI assistant that follows instruction extremely well. Help as much as you can.
+### User:
+Answer the QUESTION with a short response using information from the following CONTENT.
+QUESTION: {question}
+CONTENT: {summaries}    
+
+### Response:"""
 
     instruction_prompt_mistral_orca = """<|im_start|>system\n
-    You are an AI assistant that follows instruction extremely well. Help as much as you can.
-    <|im_start|>user\n
-    Answer the QUESTION using information from the following CONTENT. Respond with short answers that directly answer the question.
-    CONTENT: {summaries}
-    QUESTION: {question}\n
-    Answer:<|im_end|>"""
+You are an AI assistant that follows instruction extremely well. Help as much as you can.
+<|im_start|>user\n
+Answer the QUESTION using information from the following CONTENT. Respond with short answers that directly answer the question.
+CONTENT: {summaries}
+QUESTION: {question}\n
+Answer:<|im_end|>"""
 
     instruction_prompt_tinyllama_orca = """<|im_start|>system\n
-    You are an AI assistant that follows instruction extremely well. Help as much as you can.
-    <|im_start|>user\n
-    Answer the QUESTION using information from the following CONTENT. Only quote text that directly answers the question and nothing more. If you can't find an answer to the question, respond with "Sorry, I can't find an answer to that question.".
-    CONTENT: {summaries}
-    QUESTION: {question}\n
-    Answer:<|im_end|>"""
+You are an AI assistant that follows instruction extremely well. Help as much as you can.
+<|im_start|>user\n
+Answer the QUESTION using information from the following CONTENT. Only quote text that directly answers the question and nothing more. If you can't find an answer to the question, respond with "Sorry, I can't find an answer to that question.".
+CONTENT: {summaries}
+QUESTION: {question}\n
+Answer:<|im_end|>"""
+
+    instruction_prompt_marx = """
+### HUMAN:
+Answer the QUESTION using information from the following CONTENT.
+CONTENT: {summaries}
+QUESTION: {question}
+
+### RESPONSE:
+"""
 
     if model_type == "Flan Alpaca":
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_alpaca, input_variables=['question', 'summaries'])
     elif model_type == "Orca Mini":
-        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_orca, input_variables=['question', 'summaries'])
+        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_wizard_orca, input_variables=['question', 'summaries'])
 
     return INSTRUCTION_PROMPT, CONTENT_PROMPT
 
@@ -281,7 +329,7 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
         new_question_kworded = adapt_q_from_chat_history(question, chat_history, extracted_memory) # new_question_keywords, 
         
        
-        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 5, out_passages = 1,
+        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 10, out_passages = 2,
                                                                           vec_score_cut_off = 1, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
                                                                           #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
         
@@ -381,6 +429,8 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type):
         tokens = model.tokenize(full_prompt)
 
         gen_config = CtransGenGenerationConfig()
+
+        print(vars(gen_config))
 
         # Pull the generated text from the streamer, and update the model output.
         start = time.time()
@@ -633,7 +683,8 @@ def get_expanded_passages(vectorstore, docs, width):
         return ''.join(content), meta[0], meta[-1]
     
     def get_parent_content_and_meta(vstore_docs, width, target):
-        target_range = range(max(0, target - width), min(len(vstore_docs), target + width + 1))
+        #target_range = range(max(0, target - width), min(len(vstore_docs), target + width + 1))
+        target_range = range(max(0, target), min(len(vstore_docs), target + width + 1)) # Now only selects extra passages AFTER the found passage
         parent_vstore_out = [vstore_docs[i] for i in target_range]
         
         content_str_out, meta_first_out, meta_last_out = [], [], []

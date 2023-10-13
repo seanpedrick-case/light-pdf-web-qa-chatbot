@@ -90,12 +90,14 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
         print(vars(cpu_config))
 
         try:
-            model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Sheared-LLaMA-1.3B-gguf', model_type='llama', model_file='q8_0-sheared-llama-1.3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            #model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
             #model = AutoModelForCausalLM.from_pretrained('TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF', model_type='llama', model_file='tinyllama-1.1b-1t-openorca.Q8_0.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
         except:
-            model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
-            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Sheared-LLaMA-1.3B-gguf', model_type='llama', model_file='q8_0-sheared-llama-1.3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            #model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
+            model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
+            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
             #model = AutoModelForCausalLM.from_pretrained('TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF', model_type='llama', model_file='tinyllama-1.1b-1t-openorca.Q8_0.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
 
 
@@ -228,7 +230,7 @@ with block:
     with gr.Tab("Advanced features"):
         model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca", choices = ["Flan Alpaca", "Orca Mini"])
         with gr.Row():
-            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=6, step = 1, visible=True)
+            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=6, step = 1, visible=False)
             change_model_button = gr.Button(value="Load model", scale=0)
         load_text = gr.Text(label="Load status")
 
