@@ -28,7 +28,7 @@ import chatfuncs.ingest as ing
 
 ##  Load preset embeddings, vectorstore, and model
 
-embeddings_name = "thenlper/gte-base"
+embeddings_name = "BAAI/bge-base-en-v1.5"
 
 def load_embeddings(embeddings_name = "thenlper/gte-base"):
 
@@ -79,7 +79,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     if torch_device is None:
         torch_device = chatf.torch_device
 
-    if model_type == "Orca Mini":
+    if model_type == "Orca Mini (larger, slow)":
 
         gpu_config.update_gpu(gpu_layers)
         cpu_config.update_gpu(gpu_layers)
@@ -103,7 +103,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
 
         tokenizer = []
 
-    if model_type == "Flan Alpaca":
+    if model_type == "Flan Alpaca (small, fast)":
         # Huggingface chat model
         hf_checkpoint = 'declare-lab/flan-alpaca-large'
         
@@ -135,14 +135,14 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     load_confirmation = "Finished loading model: " + model_type
 
     print(load_confirmation)
-    return model_type, load_confirmation
+    return model_type, load_confirmation, model_type
 
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
-model_type = "Orca Mini"
+model_type = "Orca Mini (larger, slow)"
 
 load_model(model_type, chatf.gpu_layers, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
-model_type = "Flan Alpaca"
+model_type = "Flan Alpaca (small, fast)"
 load_model(model_type, 0, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
 def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
@@ -181,16 +181,19 @@ with block:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown("Chat with PDF or web page documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Orca Mini), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+    gr.Markdown("Chat with PDF or web page documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Orca Mini (larger, slow)), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
 
-    current_source = gr.Textbox(label="Current data source that is loaded into the app", value="Lambeth_2030-Our_Future_Our_Lambeth.pdf")
+    with gr.Row():
+        current_source = gr.Textbox(label="Current data source(s)", value="Lambeth_2030-Our_Future_Our_Lambeth.pdf", scale = 10)
+        current_model = gr.Textbox(label="Current model", value=model_type, scale = 3)
 
     with gr.Tab("Chatbot"):
 
         with gr.Row():
             chat_height = 500
             chatbot = gr.Chatbot(height=chat_height, avatar_images=('user.jfif', 'bot.jpg'),bubble_full_width = False, scale = 1)
-            sources = gr.HTML(value = "Source paragraphs where I looked for answers will appear here", height=chat_height, scale = 2)
+            #sources = gr.HTML(value = "Source paragraphs with the most relevant text will appear here", height=chat_height, scale = 2)
+            sources = gr.Markdown(value = "Source paragraphs with the most relevant text will appear here", height=chat_height, scale = 2)
 
         with gr.Row():
             message = gr.Textbox(
@@ -228,7 +231,7 @@ with block:
         ingest_embed_out = gr.Textbox(label="File/webpage preparation progress")
 
     with gr.Tab("Advanced features"):
-        model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca", choices = ["Flan Alpaca", "Orca Mini"])
+        model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Orca Mini (larger, slow)"])
         with gr.Row():
             gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=6, step = 1, visible=False)
             change_model_button = gr.Button(value="Load model", scale=0)
@@ -241,7 +244,7 @@ with block:
     examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
 
     change_model_button.click(fn=chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
-    then(fn=load_model, inputs=[model_choice, gpu_layer_choice], outputs = [model_type_state, load_text]).\
+    then(fn=load_model, inputs=[model_choice, gpu_layer_choice], outputs = [model_type_state, load_text, current_model]).\
     then(lambda: chatf.restore_interactivity(), None, [message], queue=False).\
     then(chatf.clear_chat, inputs=[chat_history_state, sources, message, current_topic], outputs=[chat_history_state, sources, message, current_topic]).\
     then(lambda: None, None, chatbot, queue=False)

@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 
 # Model packages
-import torch
+import torch.cuda
 from threading import Thread
 from transformers import pipeline, TextIteratorStreamer
 
@@ -21,16 +21,16 @@ from langchain.retrievers import SVMRetriever
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 
-# For keyword extraction
-import nltk
-nltk.download('wordnet')
+# For keyword extraction (not currently used)
+#import nltk
+#nltk.download('wordnet')
 from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
-import keybert
+from keybert import KeyBERT
 
 # For Name Entity Recognition model
-from span_marker import SpanMarkerModel
+#from span_marker import SpanMarkerModel # Not currently used
 
 # For BM25 retrieval
 from gensim.corpora import Dictionary
@@ -60,7 +60,7 @@ hlt_strat = [" ", ". ", "! ", "? ", ": ", "\n\n", "\n", ", "]
 hlt_overlap = 4
 
 ## Initialise NER model ##
-ner_model = SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base-multinerd")
+ner_model = []#SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base-multinerd") # Not currently used
 
 ## Initialise keyword model ##
 # Used to pull out keywords from chat history to add to user queries behind the scenes
@@ -78,7 +78,7 @@ print("Running on device:", torch_device)
 threads = 8 #torch.get_num_threads()
 print("CPU threads:", threads)
 
-# Flan Alpaca Model parameters
+# Flan Alpaca (small, fast) Model parameters
 temperature: float = 0.1
 top_k: int = 3
 top_p: float = 1
@@ -202,7 +202,7 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 
 # Prompt functions
 
-def base_prompt_templates(model_type = "Flan Alpaca"):    
+def base_prompt_templates(model_type = "Flan Alpaca (small, fast)"):    
   
     #EXAMPLE_PROMPT = PromptTemplate(
     #    template="\nCONTENT:\n\n{page_content}\n\nSOURCE: {source}\n\n",
@@ -313,9 +313,9 @@ QUESTION: {question}
 ### RESPONSE:
 """
 
-    if model_type == "Flan Alpaca":
+    if model_type == "Flan Alpaca (small, fast)":
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_alpaca, input_variables=['question', 'summaries'])
-    elif model_type == "Orca Mini":
+    elif model_type == "Orca Mini (larger, slow)":
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_wizard_orca, input_variables=['question', 'summaries'])
 
     return INSTRUCTION_PROMPT, CONTENT_PROMPT
@@ -359,6 +359,9 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
 
 def create_full_prompt(user_input, history, extracted_memory, vectorstore, embeddings, model_type):
     
+    if not user_input.strip():
+        return history, "", ""
+
     #if chain_agent is None:
     #    history.append((user_input, "Please click the button to submit the Huggingface API key before using the chatbot (top right)"))
     #    return history, history, "", ""
@@ -385,7 +388,13 @@ def create_full_prompt(user_input, history, extracted_memory, vectorstore, embed
 def produce_streaming_answer_chatbot(history, full_prompt, model_type):
     #print("Model type is: ", model_type)
 
-    if model_type == "Flan Alpaca": 
+    #if not full_prompt.strip():
+    #    if history is None:
+    #        history = []
+
+    #    return history
+
+    if model_type == "Flan Alpaca (small, fast)": 
         # Get the model and tokenizer, and tokenize the user text.
         model_inputs = tokenizer(text=full_prompt, return_tensors="pt", return_attention_mask=False).to(torch_device) # return_attention_mask=False was added
 
@@ -425,7 +434,7 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type):
         print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
         print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
-    elif model_type == "Orca Mini":
+    elif model_type == "Orca Mini (larger, slow)":
         tokens = model.tokenize(full_prompt)
 
         gen_config = CtransGenGenerationConfig()
@@ -460,7 +469,7 @@ def adapt_q_from_chat_history(question, chat_history, extracted_memory, keyword_
 
         if chat_history_str:
             # Keyword extraction is now done in the add_inputs_to_history function
-            extracted_memory = extracted_memory#remove_q_stopwords(str(chat_history_first_q) + " " + str(chat_history_first_ans))
+            #remove_q_stopwords(str(chat_history_first_q) + " " + str(chat_history_first_ans))
             
            
             new_question_kworded = str(extracted_memory) + ". " + question #+ " " + new_question_keywords
@@ -966,7 +975,7 @@ def keybert_keywords(text, n, kw_model):
     tokens_lemma = apply_lemmatize(text)
     lemmatised_text = ' '.join(tokens_lemma)
 
-    keywords_text = keybert.KeyBERT(model=kw_model).extract_keywords(lemmatised_text, stop_words='english', top_n=n, 
+    keywords_text = KeyBERT(model=kw_model).extract_keywords(lemmatised_text, stop_words='english', top_n=n, 
                                                    keyphrase_ngram_range=(1, 1))
     keywords_list = [item[0] for item in keywords_text]
 
