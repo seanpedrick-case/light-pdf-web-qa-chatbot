@@ -69,7 +69,7 @@ kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniL
 
 if torch.cuda.is_available():
     torch_device = "cuda"
-    gpu_layers = 12
+    gpu_layers = 0
 else: 
     torch_device =  "cpu"
     gpu_layers = 0
@@ -92,7 +92,7 @@ reset: bool = False
 stream: bool = True
 threads: int = threads
 batch_size:int = 256
-context_length:int = 2048
+context_length:int = 4096
 sample = True
 
 

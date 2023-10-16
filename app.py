@@ -81,7 +81,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
 
     if model_type == "Mistral Open Orca (larger, slow)":
         if torch_device == "cuda":
-            gpu_config.update_gpu(12)
+            gpu_config.update_gpu(gpu_layers)
         else:
             gpu_config.update_gpu(gpu_layers)
             cpu_config.update_gpu(gpu_layers)
@@ -94,12 +94,12 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
         try:
             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-            model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='llama', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
         
         except:
             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
-            model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='llama', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
+            model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
 
         tokenizer = []
 
@@ -233,7 +233,7 @@ with block:
     with gr.Tab("Advanced features"):
         model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Mistral Open Orca (larger, slow)"])
         with gr.Row():
-            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=5, step = 1, visible=False)
+            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=20, step = 1, visible=True)
             change_model_button = gr.Button(value="Load model", scale=0)
         load_text = gr.Text(label="Load status")
 
