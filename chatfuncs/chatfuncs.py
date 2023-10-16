@@ -69,7 +69,7 @@ kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniL
 
 if torch.cuda.is_available():
     torch_device = "cuda"
-    gpu_layers = 0
+    gpu_layers = 12
 else: 
     torch_device =  "cpu"
     gpu_layers = 0

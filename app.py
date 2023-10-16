@@ -80,9 +80,11 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
         torch_device = chatf.torch_device
 
     if model_type == "Mistral Open Orca (larger, slow)":
-
-        gpu_config.update_gpu(gpu_layers)
-        cpu_config.update_gpu(gpu_layers)
+        if torch_device == "cuda":
+            gpu_config.update_gpu(12)
+        else:
+            gpu_config.update_gpu(gpu_layers)
+            cpu_config.update_gpu(gpu_layers)
 
         print("Loading with", cpu_config.gpu_layers, "model layers sent to GPU.")
 
@@ -231,7 +233,7 @@ with block:
     with gr.Tab("Advanced features"):
         model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Mistral Open Orca (larger, slow)"])
         with gr.Row():
-            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=5, step = 1, visible=True)
+            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=5, step = 1, visible=False)
             change_model_button = gr.Button(value="Load model", scale=0)
         load_text = gr.Text(label="Load status")
 
