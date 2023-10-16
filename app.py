@@ -231,10 +231,12 @@ with block:
         ingest_embed_out = gr.Textbox(label="File/webpage preparation progress")
 
     with gr.Tab("Advanced features"):
-        model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Mistral Open Orca (larger, slow)"])
         with gr.Row():
-            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=20, step = 1, visible=True)
+            model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Mistral Open Orca (larger, slow)"])
             change_model_button = gr.Button(value="Load model", scale=0)
+        with gr.Accordion("Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", open = False):
+            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU.", value=0, minimum=0, maximum=5, step = 1, visible=True)
+            
         load_text = gr.Text(label="Load status")
 
     gr.HTML(
