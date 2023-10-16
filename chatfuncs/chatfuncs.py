@@ -315,8 +315,8 @@ QUESTION: {question}
 
     if model_type == "Flan Alpaca (small, fast)":
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_alpaca, input_variables=['question', 'summaries'])
-    elif model_type == "Orca Mini (larger, slow)":
-        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_wizard_orca, input_variables=['question', 'summaries'])
+    elif model_type == "Mistral Open Orca (larger, slow)":
+        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_mistral_orca, input_variables=['question', 'summaries'])
 
     return INSTRUCTION_PROMPT, CONTENT_PROMPT
 
@@ -360,7 +360,7 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
 def create_full_prompt(user_input, history, extracted_memory, vectorstore, embeddings, model_type):
     
     if not user_input.strip():
-        return history, "", ""
+        return history, "", "Respond with 'Please enter a question.' RESPONSE:"
 
     #if chain_agent is None:
     #    history.append((user_input, "Please click the button to submit the Huggingface API key before using the chatbot (top right)"))
@@ -434,7 +434,7 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type):
         print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
         print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
-    elif model_type == "Orca Mini (larger, slow)":
+    elif model_type == "Mistral Open Orca (larger, slow)":
         tokens = model.tokenize(full_prompt)
 
         gen_config = CtransGenGenerationConfig()

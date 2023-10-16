@@ -79,7 +79,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     if torch_device is None:
         torch_device = chatf.torch_device
 
-    if model_type == "Orca Mini (larger, slow)":
+    if model_type == "Mistral Open Orca (larger, slow)":
 
         gpu_config.update_gpu(gpu_layers)
         cpu_config.update_gpu(gpu_layers)
@@ -90,16 +90,14 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
         print(vars(cpu_config))
 
         try:
-            #model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-            model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-            #model = AutoModelForCausalLM.from_pretrained('TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF', model_type='llama', model_file='tinyllama-1.1b-1t-openorca.Q8_0.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='llama', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+        
         except:
-            #model = AutoModelForCausalLM.from_pretrained('juanjgit/orca_mini_3B-GGUF', model_type='llama', model_file='orca-mini-3b.q4_0.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
-            model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
+            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
-            #model = AutoModelForCausalLM.from_pretrained('TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF', model_type='llama', model_file='tinyllama-1.1b-1t-openorca.Q8_0.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
-
+            model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='llama', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
 
         tokenizer = []
 
@@ -138,7 +136,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     return model_type, load_confirmation, model_type
 
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
-model_type = "Orca Mini (larger, slow)"
+model_type = "Mistral Open Orca (larger, slow)"
 
 load_model(model_type, chatf.gpu_layers, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
@@ -181,7 +179,7 @@ with block:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown("Chat with PDF or web page documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Orca Mini (larger, slow)), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+    gr.Markdown("Chat with PDF or web page documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Mistral Open Orca (larger, slow)), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
 
     with gr.Row():
         current_source = gr.Textbox(label="Current data source(s)", value="Lambeth_2030-Our_Future_Our_Lambeth.pdf", scale = 10)
@@ -197,7 +195,7 @@ with block:
 
         with gr.Row():
             message = gr.Textbox(
-                label="What's your question?",
+                label="Enter your question here.",
                 lines=1,
             )     
         with gr.Row():
@@ -231,14 +229,14 @@ with block:
         ingest_embed_out = gr.Textbox(label="File/webpage preparation progress")
 
     with gr.Tab("Advanced features"):
-        model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Orca Mini (larger, slow)"])
+        model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Mistral Open Orca (larger, slow)"])
         with gr.Row():
-            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=6, step = 1, visible=False)
+            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", value=0, minimum=0, maximum=5, step = 1, visible=True)
             change_model_button = gr.Button(value="Load model", scale=0)
         load_text = gr.Text(label="Load status")
 
     gr.HTML(
-        "<center>This app is based on the models Flan Alpaca and Orca Mini. It powered by Gradio, Transformers, Ctransformers, and Langchain.</a></center>"
+        "<center>This app is based on the models Flan Alpaca and Mistral Open Orca. It powered by Gradio, Transformers, Ctransformers, and Langchain.</a></center>"
     )
 
     examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
