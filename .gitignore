@@ -3,6 +3,8 @@
 *.pdf
 *.spec
 *.toc
+*.csv
 bootstrapper.py
 build/*
 dist/*
+Q tests/*

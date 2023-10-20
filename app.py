@@ -95,11 +95,13 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
             model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            #model = AutoModelForCausalLM.from_pretrained('TheBloke/MistralLite-7B-GGUF', model_type='mistral', model_file='mistrallite.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
         
         except:
             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
             model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
+            #model = AutoModelForCausalLM.from_pretrained('TheBloke/MistralLite-7B-GGUF', model_type='mistral', model_file='mistrallite.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
 
         tokenizer = []
 
@@ -192,12 +194,12 @@ with block:
         with gr.Row():
             chat_height = 500
             chatbot = gr.Chatbot(height=chat_height, avatar_images=('user.jfif', 'bot.jpg'),bubble_full_width = False, scale = 1)
-            #sources = gr.HTML(value = "Source paragraphs with the most relevant text will appear here", height=chat_height, scale = 2)
-            sources = gr.Markdown(value = "Source paragraphs with the most relevant text will appear here", height=chat_height, scale = 2)
+            with gr.Accordion("Open this tab to see the source paragraphs used to generate the answer", open = False):
+                sources = gr.HTML(value = "Source paragraphs with the most relevant text will appear here", height=chat_height, scale = 2)
 
         with gr.Row():
             message = gr.Textbox(
-                label="Enter your question here.",
+                label="Enter your question here",
                 lines=1,
             )     
         with gr.Row():
