@@ -5,7 +5,7 @@ import os
 
 # Need to overwrite version of gradio present in Huggingface spaces as it doesn't have like buttons/avatars (Oct 2023)
 #os.system("pip uninstall -y gradio")
-os.system("pip install gradio==3.42.0")
+#os.system("pip install gradio==3.42.0")
 
 from typing import TypeVar
 from langchain.embeddings import HuggingFaceEmbeddings, HuggingFaceInstructEmbeddings
@@ -24,7 +24,6 @@ PandasDataFrame = TypeVar('pd.core.frame.DataFrame')
 
 #from chatfuncs.chatfuncs import *
 import chatfuncs.ingest as ing
-
 
 ##  Load preset embeddings, vectorstore, and model
 
@@ -107,7 +106,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
 
     if model_type == "Flan Alpaca (small, fast)":
         # Huggingface chat model
-        hf_checkpoint = 'declare-lab/flan-alpaca-large'
+        hf_checkpoint = 'declare-lab/flan-alpaca-large'#'declare-lab/flan-alpaca-base' # # #
         
         def create_hf_model(model_name):
 
@@ -140,9 +139,8 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     return model_type, load_confirmation, model_type
 
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
-model_type = "Mistral Open Orca (larger, slow)"
-
-load_model(model_type, chatf.gpu_layers, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
+#model_type = "Mistral Open Orca (larger, slow)"
+#load_model(model_type, chatf.gpu_layers, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
 model_type = "Flan Alpaca (small, fast)"
 load_model(model_type, 0, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
@@ -183,7 +181,7 @@ with block:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown("Chat with PDF or web page documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Mistral Open Orca (larger, slow)), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+    gr.Markdown("Chat with PDF, web page or (new) csv/Excel documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Mistral Open Orca (larger, slow)), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
 
     with gr.Row():
         current_source = gr.Textbox(label="Current data source(s)", value="Lambeth_2030-Our_Future_Our_Lambeth.pdf", scale = 10)
@@ -192,10 +190,10 @@ with block:
     with gr.Tab("Chatbot"):
 
         with gr.Row():
-            chat_height = 500
-            chatbot = gr.Chatbot(height=chat_height, avatar_images=('user.jfif', 'bot.jpg'),bubble_full_width = False, scale = 1)
+            #chat_height = 500
+            chatbot = gr.Chatbot(avatar_images=('user.jfif', 'bot.jpg'),bubble_full_width = False, scale = 1) # , height=chat_height
             with gr.Accordion("Open this tab to see the source paragraphs used to generate the answer", open = False):
-                sources = gr.HTML(value = "Source paragraphs with the most relevant text will appear here", height=chat_height, scale = 2)
+                sources = gr.HTML(value = "Source paragraphs with the most relevant text will appear here", scale = 1) # , height=chat_height
 
         with gr.Row():
             message = gr.Textbox(
@@ -219,18 +217,23 @@ with block:
             
 
 
-    with gr.Tab("Load in a different PDF file or web page to chat"):
+    with gr.Tab("Load in a different file to chat with"):
         with gr.Accordion("PDF file", open = False):
             in_pdf = gr.File(label="Upload pdf", file_count="multiple", file_types=['.pdf'])
             load_pdf = gr.Button(value="Load in file", variant="secondary", scale=0)
         
         with gr.Accordion("Web page", open = False):
             with gr.Row():
-                in_web = gr.Textbox(label="Enter webpage url")
-                in_div = gr.Textbox(label="(Advanced) Webpage div for text extraction", value="p", placeholder="p")
-            load_web = gr.Button(value="Load in webpage", variant="secondary", scale=0) 
+                in_web = gr.Textbox(label="Enter web page url")
+                in_div = gr.Textbox(label="(Advanced) Web page div for text extraction", value="p", placeholder="p")
+            load_web = gr.Button(value="Load in webpage", variant="secondary", scale=0)
+
+        with gr.Accordion("CSV/Excel file", open = False):
+            in_csv = gr.File(label="Upload CSV/Excel file", file_count="multiple", file_types=['.csv', '.xlsx'])
+            in_text_column = gr.Textbox(label="Enter column name where text is stored")
+            load_csv = gr.Button(value="Load in CSV/Excel file", variant="secondary", scale=0)
         
-        ingest_embed_out = gr.Textbox(label="File/webpage preparation progress")
+        ingest_embed_out = gr.Textbox(label="File/web page preparation progress")
 
     with gr.Tab("Advanced features"):
         with gr.Row():
@@ -264,6 +267,12 @@ with block:
              then(ing.html_text_to_docs, inputs=[ingest_text, ingest_metadata], outputs=[ingest_docs]).\
              then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state]).\
              then(chatf.hide_block, outputs = [examples_set])
+    
+    # Load in a csv/excel file
+    load_csv_click = load_csv.click(ing.parse_csv_or_excel, inputs=[in_csv, in_text_column], outputs=[ingest_text, current_source]).\
+             then(ing.csv_excel_text_to_docs, inputs=[ingest_text, in_text_column], outputs=[ingest_docs]).\
+             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state]).\
+             then(chatf.hide_block, outputs = [examples_set])
 
     # Load in a webpage
 
@@ -289,6 +298,7 @@ with block:
     clear.click(chatf.clear_chat, inputs=[chat_history_state, sources, message, current_topic], outputs=[chat_history_state, sources, message, current_topic])
     clear.click(lambda: None, None, chatbot, queue=False)
 
+    # Thumbs up or thumbs down voting function
     chatbot.like(chatf.vote, [chat_history_state, instruction_prompt_out, model_type_state], None)
 
 block.queue(concurrency_count=1).launch(debug=True)

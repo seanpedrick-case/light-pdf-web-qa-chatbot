@@ -1,4 +1,5 @@
 import re
+import os
 import datetime
 from typing import TypeVar, Dict, List, Tuple
 import time
@@ -66,7 +67,7 @@ ner_model = []#SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base
 # Used to pull out keywords from chat history to add to user queries behind the scenes
 kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniLM-L6-v2")
 
-
+# Currently set gpu_layers to 0 even with cuda due to persistent bugs in implementation with cuda
 if torch.cuda.is_available():
     torch_device = "cuda"
     gpu_layers = 0
@@ -135,18 +136,6 @@ class CtransInitConfig_cpu(CtransInitConfig_gpu):
 gpu_config = CtransInitConfig_gpu()
 cpu_config = CtransInitConfig_cpu()
 
-
-#@dataclass
-#class CtransGenGenerationConfig:
-#    top_k: int = top_k
-#    top_p: float = top_p
-#    temperature: float = temperature
-#    repetition_penalty: float = tinyllama_repetition_penalty
-#    last_n_tokens: int = last_n_tokens
-#    seed: int = seed
-#    batch_size:int = batch_size
-#     threads: int = threads
-#     reset: bool = True
 
 class CtransGenGenerationConfig:
     def __init__(self, temperature=temperature,
@@ -333,7 +322,11 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
                                                                           #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
         
         # Expand the found passages to the neighbouring context
-        docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=3)
+        file_type = determine_file_type(doc_df['meta_url'][0])
+
+        # Only expand passages if not tabular data
+        if (file_type != ".csv") & (file_type != ".xlsx"):
+            docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=3)
 
         if docs_keep_as_doc == []:
             {"answer": "I'm sorry, I couldn't find a relevant answer to this question.", "sources":"I'm sorry, I couldn't find a relevant source for this question."}
@@ -344,8 +337,9 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
         doc_df['meta_clean'] = [f"<b>{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}</b>" for d in doc_df['metadata']]
         doc_df['content_meta'] = doc_df['meta_clean'].astype(str) + ".<br><br>" + doc_df['page_content'].astype(str)
 
-        modified_page_content = [f" SOURCE {i+1} - {word}" for i, word in enumerate(doc_df['page_content'])]
-        docs_content_string = ''.join(modified_page_content)
+        #modified_page_content = [f" SOURCE {i+1} - {word}" for i, word in enumerate(doc_df['page_content'])]
+        modified_page_content = [f" SOURCE {i+1} - {word}" for i, word in enumerate(doc_df['content_meta'])]
+        docs_content_string = '<br><br>'.join(modified_page_content)
 
         sources_docs_content_string = '<br><br>'.join(doc_df['content_meta'])#.replace("  "," ")#.strip()
      
@@ -481,6 +475,19 @@ def adapt_q_from_chat_history(question, chat_history, extracted_memory, keyword_
             
         return new_question_kworded
 
+def determine_file_type(file_path):
+        """
+        Determine the file type based on its extension.
+    
+        Parameters:
+            file_path (str): Path to the file.
+    
+        Returns:
+            str: File extension (e.g., '.pdf', '.docx', '.txt', '.html').
+        """
+        return os.path.splitext(file_path)[1].lower()
+
+
 def create_doc_df(docs_keep_out):
     # Extract content and metadata from 'winning' passages.
             content=[]
@@ -489,11 +496,17 @@ def create_doc_df(docs_keep_out):
             page_section=[]
             score=[]
 
+            
+
             for item in docs_keep_out:
                 content.append(item[0].page_content)
                 meta.append(item[0].metadata)
                 meta_url.append(item[0].metadata['source'])
-                page_section.append(item[0].metadata['page_section'])
+
+                file_extension = determine_file_type(item[0].metadata['source'])
+                if (file_extension != ".csv") & (file_extension != ".xlsx"):
+                    page_section.append(item[0].metadata['page_section'])
+                else: page_section.append("")
                 score.append(item[1])       
 
             # Create df from 'winning' passages
@@ -728,6 +741,12 @@ def get_expanded_passages(vectorstore, docs, width):
     expanded_docs = []
     for doc, score in docs:
         search_source = doc.metadata['source']
+        
+
+        #if file_type == ".csv" | file_type == ".xlsx":
+        #     content_str, meta_first, meta_last = get_parent_content_and_meta(vstore_by_source[search_source], 0, search_index)
+
+        #else:
         search_section = doc.metadata['page_section']
         parent_vstore_meta_section = [doc.metadata['page_section'] for _, doc in vstore_by_source[search_source]]
         search_index = parent_vstore_meta_section.index(search_section) if search_section in parent_vstore_meta_section else -1

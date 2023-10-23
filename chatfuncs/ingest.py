@@ -44,21 +44,7 @@ chunk_overlap = 0
 start_index = True
 
 ## Parse files
-
-def parse_file(file_paths):
-    """
-    Accepts a list of file paths, determines each file's type based on its extension,
-    and passes it to the relevant parsing function.
-    
-    Parameters:
-        file_paths (list): List of file paths.
-        div (str): (optional) Div to pull out of html file/url with BeautifulSoup
-    
-    Returns:
-        dict: A dictionary with file paths as keys and their parsed content (or error message) as values.
-    """
-    
-    def determine_file_type(file_path):
+def determine_file_type(file_path):
         """
         Determine the file type based on its extension.
     
@@ -70,6 +56,21 @@ def parse_file(file_paths):
         """
         return os.path.splitext(file_path)[1].lower()
 
+def parse_file(file_paths, text_column='text'):
+    """
+    Accepts a list of file paths, determines each file's type based on its extension,
+    and passes it to the relevant parsing function.
+    
+    Parameters:
+        file_paths (list): List of file paths.
+        text_column (str): Name of the column in CSV/Excel files that contains the text content.
+    
+    Returns:
+        dict: A dictionary with file paths as keys and their parsed content (or error message) as values.
+    """
+    
+    
+
     if not isinstance(file_paths, list):
         raise ValueError("Expected a list of file paths.")
     
@@ -78,7 +79,9 @@ def parse_file(file_paths):
         '.docx': parse_docx,
         '.txt': parse_txt,
         '.html': parse_html,
-        '.htm': parse_html  # Considering both .html and .htm for HTML files
+        '.htm': parse_html,  # Considering both .html and .htm for HTML files
+        '.csv': lambda file_path: parse_csv_or_excel(file_path, text_column),
+        '.xlsx': lambda file_path: parse_csv_or_excel(file_path, text_column)
     }
     
     parsed_contents = {}
@@ -114,6 +117,64 @@ def text_regex_clean(text):
         text = re.sub(r'(?<=[a-z])(?=[A-Z])', '. \n\n', text)
 
         return text
+
+def parse_csv_or_excel(file_paths, text_column = "text"):
+        """
+        Read in a CSV or Excel file.
+        
+        Parameters:
+            file_path (str): Path to the CSV file.
+            text_column (str): Name of the column in the CSV file that contains the text content.
+        
+        Returns:
+            Pandas DataFrame: Dataframe output from file read
+        """
+
+        file_names = []
+        out_df = pd.DataFrame()
+
+        for file_path in file_paths:
+            file_extension = determine_file_type(file_path.name)
+            file_name = get_file_path_end(file_path.name)
+
+            if file_extension == ".csv":
+                df = pd.read_csv(file_path.name)
+                if text_column not in df.columns: return pd.DataFrame(), ['Please choose a valid column name']
+                df['source'] = file_name
+                df['page_section'] = ""
+            elif file_extension == ".xlsx":
+                df = pd.read_excel(file_path.name, engine='openpyxl')
+                if text_column not in df.columns: return pd.DataFrame(), ['Please choose a valid column name']
+                df['source'] = file_name
+                df['page_section'] = ""
+            else:
+                print(f"Unsupported file type: {file_extension}")
+                return pd.DataFrame(), ['Please choose a valid file type']
+            
+            file_names.append(file_name)
+            out_df = pd.concat([out_df, df])
+        
+        #if text_column not in df.columns:
+        #    return f"Column '{text_column}' not found in {file_path}"
+        #text_out = " ".join(df[text_column].dropna().astype(str))
+        return out_df, file_names
+
+def parse_excel(file_path, text_column):
+        """
+        Read text from an Excel file.
+        
+        Parameters:
+            file_path (str): Path to the Excel file.
+            text_column (str): Name of the column in the Excel file that contains the text content.
+        
+        Returns:
+            Pandas DataFrame: Dataframe output from file read
+        """
+        df = pd.read_excel(file_path, engine='openpyxl')
+        #if text_column not in df.columns:
+        #    return f"Column '{text_column}' not found in {file_path}"
+        #text_out = " ".join(df[text_column].dropna().astype(str))
+        return df
 
 def parse_pdf(file) -> List[str]:
 
@@ -308,8 +369,9 @@ def text_to_docs(text_dict: dict, chunk_size: int = chunk_size) -> List[Document
         if ext == '.pdf':
             docs, page_docs = pdf_text_to_docs(content, chunk_size)
         elif ext in ['.html', '.htm', '.txt', '.docx']:
-            # Assuming you want to process HTML similarly to PDF in this context
             docs = html_text_to_docs(content, chunk_size)
+        elif ext in ['.csv', '.xlsx']:
+            docs, page_docs = csv_excel_text_to_docs(content, chunk_size)
         else:
             print(f"Unsupported file type {ext} for {file_path}. Skipping.")
             continue
@@ -399,6 +461,44 @@ def html_text_to_docs(texts, metadatas, chunk_size:int = chunk_size):
     
 
     return documents
+
+def csv_excel_text_to_docs(df, text_column='text', chunk_size=None) -> List[Document]:
+    """Converts a DataFrame's content to a list of Documents with metadata."""
+    
+    doc_sections = []
+    df[text_column] = df[text_column].astype(str) # Ensure column is a string column
+
+    # For each row in the dataframe
+    for idx, row in df.iterrows():
+        # Extract the text content for the document
+        doc_content = row[text_column]
+        
+        # Generate metadata containing other columns' data
+        metadata = {"row": idx + 1}
+        for col, value in row.items():
+            if col != text_column:
+                metadata[col] = value
+
+        # If chunk_size is provided, split the text into chunks
+        if chunk_size:
+            # Assuming you have a text splitter function similar to the PDF handling
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=chunk_size,
+                # Other arguments as required by the splitter
+            )
+            sections = text_splitter.split_text(doc_content)
+            
+            # For each section, create a Document object
+            for i, section in enumerate(sections):
+                doc = Document(page_content=section, 
+                               metadata={**metadata, "section": i, "row_section": f"{metadata['row']}-{i}"})
+                doc_sections.append(doc)
+        else:
+            # If no chunk_size is provided, create a single Document object for the row
+            doc = Document(page_content=doc_content, metadata=metadata)
+            doc_sections.append(doc)
+    
+    return doc_sections
 
 # # Functions for working with documents after loading them back in
 
