@@ -236,13 +236,15 @@ with block:
         ingest_embed_out = gr.Textbox(label="File/web page preparation progress")
 
     with gr.Tab("Advanced features"):
+        out_passages = gr.Slider(minimum=1, value = 2, maximum=10, step=1, label="Choose number of passages to retrieve from the document. Numbers greater than 2 may lead to increased hallucinations or input text being truncated.")
         with gr.Row():
             model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Mistral Open Orca (larger, slow)"])
             change_model_button = gr.Button(value="Load model", scale=0)
-        with gr.Accordion("Choose number of model layers to send to GPU (WARNING: please don't modify unless you have a GPU).", open = False):
+        with gr.Accordion("Choose number of model layers to send to GPU (WARNING: please don't modify unless you are sure you have a GPU).", open = False):
             gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU.", value=0, minimum=0, maximum=5, step = 1, visible=True)
             
         load_text = gr.Text(label="Load status")
+        
 
     gr.HTML(
         "<center>This app is based on the models Flan Alpaca and Mistral Open Orca. It powered by Gradio, Transformers, Ctransformers, and Langchain.</a></center>"
@@ -277,14 +279,14 @@ with block:
     # Load in a webpage
 
     # Click/enter to send message action
-    response_click = submit.click(chatf.create_full_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state, model_type_state], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False, api_name="retrieval").\
+    response_click = submit.click(chatf.create_full_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state, model_type_state, out_passages], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False, api_name="retrieval").\
                 then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
                 then(chatf.produce_streaming_answer_chatbot, inputs=[chatbot, instruction_prompt_out, model_type_state], outputs=chatbot)
     response_click.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\
                 then(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
                 then(lambda: chatf.restore_interactivity(), None, [message], queue=False)
 
-    response_enter = message.submit(chatf.create_full_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state, model_type_state], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False).\
+    response_enter = message.submit(chatf.create_full_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state, model_type_state, out_passages], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False).\
                 then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
                 then(chatf.produce_streaming_answer_chatbot, [chatbot, instruction_prompt_out, model_type_state], chatbot)    
     response_enter.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\

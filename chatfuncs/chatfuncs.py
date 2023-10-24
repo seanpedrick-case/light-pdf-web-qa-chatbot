@@ -312,7 +312,7 @@ def write_out_metadata_as_string(metadata_in):
     metadata_string = [f"{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}" for d in metadata_in] # ['metadata']
     return metadata_string
 
-def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings): # , 
+def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings, out_passages = 2): # , 
         
         question =  inputs["question"]
         chat_history = inputs["chat_history"]
@@ -321,7 +321,7 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
         new_question_kworded = adapt_q_from_chat_history(question, chat_history, extracted_memory) # new_question_keywords, 
         
        
-        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 25, out_passages = 2,
+        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 25, out_passages = out_passages,
                                                                           vec_score_cut_off = 1, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
                                                                           #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
         
@@ -356,7 +356,7 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
                 
         return instruction_prompt_out, sources_docs_content_string, new_question_kworded
 
-def create_full_prompt(user_input, history, extracted_memory, vectorstore, embeddings, model_type):
+def create_full_prompt(user_input, history, extracted_memory, vectorstore, embeddings, model_type, out_passages):
     
     if not user_input.strip():
         return history, "", "Respond with 'Please enter a question.' RESPONSE:"
@@ -373,7 +373,7 @@ def create_full_prompt(user_input, history, extracted_memory, vectorstore, embed
     instruction_prompt, content_prompt = base_prompt_templates(model_type=model_type)
     instruction_prompt_out, docs_content_string, new_question_kworded =\
                 generate_expanded_prompt({"question": user_input, "chat_history": history}, #vectorstore,
-                                    instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings)
+                                    instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings, out_passages)
     
   
     history.append(user_input)
