@@ -158,6 +158,9 @@ class CtransGenGenerationConfig:
         self.batch_size = batch_size
         self.reset = reset
 
+    def update_temp(self, new_value):
+        self.temperature = new_value
+
 # Vectorstore funcs
 
 def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
@@ -220,23 +223,6 @@ QUESTION: {question}
 
 Response:"""
 
-    instruction_prompt_template_openllama = """Answer the QUESTION using information from the following CONTENT.
-QUESTION - {question}
-CONTENT - {summaries}    
-Answer:"""
-
-    instruction_prompt_template_platypus = """### Instruction:
-Answer the QUESTION using information from the following CONTENT.
-CONTENT: {summaries}
-QUESTION: {question}   
-### Response:"""
-
-    instruction_prompt_template_wizard_orca_quote = """### HUMAN:
-Quote text from the CONTENT to answer the QUESTION below.
-CONTENT - {summaries}  
-QUESTION - {question}
-### RESPONSE:
-"""
 
     instruction_prompt_template_wizard_orca = """### HUMAN:
 Answer the QUESTION below based on the CONTENT. Only refer to CONTENT that directly answers the question.
@@ -266,15 +252,6 @@ CONTENT: {summaries}
 ### Response:
 """
 
-    instruction_prompt_template_orca_rev = """
-### System:
-You are an AI assistant that follows instruction extremely well. Help as much as you can.
-### User:
-Answer the QUESTION with a short response using information from the following CONTENT.
-QUESTION: {question}
-CONTENT: {summaries}    
-
-### Response:"""
 
     instruction_prompt_mistral_orca = """<|im_start|>system\n
 You are an AI assistant that follows instruction extremely well. Help as much as you can.
@@ -283,23 +260,6 @@ Answer the QUESTION using information from the following CONTENT. Respond with s
 CONTENT: {summaries}
 QUESTION: {question}\n
 Answer:<|im_end|>"""
-
-    instruction_prompt_tinyllama_orca = """<|im_start|>system\n
-You are an AI assistant that follows instruction extremely well. Help as much as you can.
-<|im_start|>user\n
-Answer the QUESTION using information from the following CONTENT. Only quote text that directly answers the question and nothing more. If you can't find an answer to the question, respond with "Sorry, I can't find an answer to that question.".
-CONTENT: {summaries}
-QUESTION: {question}\n
-Answer:<|im_end|>"""
-
-    instruction_prompt_marx = """
-### HUMAN:
-Answer the QUESTION using information from the following CONTENT.
-CONTENT: {summaries}
-QUESTION: {question}
-
-### RESPONSE:
-"""
 
     if model_type == "Flan Alpaca (small, fast)":
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_alpaca, input_variables=['question', 'summaries'])
@@ -322,8 +282,15 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
         
        
         docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 25, out_passages = out_passages,
-                                                                          vec_score_cut_off = 1, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
+                                                                          vec_score_cut_off = 0.85, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
                                                                           #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
+        
+        #print(docs_keep_as_doc)
+        #print(doc_df)
+        if (not docs_keep_as_doc) | (doc_df.empty):
+            sorry_prompt = """Say 'Sorry, there is no relevant information to answer this question.'.
+RESPONSE:"""
+            return sorry_prompt, "No relevant sources found.", new_question_kworded
         
         # Expand the found passages to the neighbouring context
         file_type = determine_file_type(doc_df['meta_url'][0])
@@ -332,8 +299,6 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
         if (file_type != ".csv") & (file_type != ".xlsx"):
             docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=3)
 
-        if docs_keep_as_doc == []:
-            {"answer": "I'm sorry, I couldn't find a relevant answer to this question.", "sources":"I'm sorry, I couldn't find a relevant source for this question."}
         
  
         # Build up sources content to add to user display
@@ -380,11 +345,21 @@ def create_full_prompt(user_input, history, extracted_memory, vectorstore, embed
     
     print("Output history is:")
     print(history)
+
+    print("Final prompt to model is:")
+    print(instruction_prompt_out)
         
     return history, docs_content_string, instruction_prompt_out
 
 # Chat functions
-def produce_streaming_answer_chatbot(history, full_prompt, model_type):
+def produce_streaming_answer_chatbot(history, full_prompt, model_type,
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+            sample=sample,
+            repetition_penalty=repetition_penalty,
+            top_p=top_p,
+            top_k=top_k
+):
     #print("Model type is: ", model_type)
 
     #if not full_prompt.strip():
@@ -410,6 +385,9 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type):
             temperature=temperature,
             top_k=top_k
         )
+
+        print(generate_kwargs)
+
         t = Thread(target=model.generate, kwargs=generate_kwargs)
         t.start()
 
@@ -437,6 +415,7 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type):
         tokens = model.tokenize(full_prompt)
 
         gen_config = CtransGenGenerationConfig()
+        gen_config.update_temp(temperature)
 
         print(vars(gen_config))
 
@@ -502,6 +481,8 @@ def create_doc_df(docs_keep_out):
             page_section=[]
             score=[]
 
+            doc_df = pd.DataFrame()
+
             
 
             for item in docs_keep_out:
@@ -530,6 +511,7 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
 
             #vectorstore=globals()["vectorstore"]
             #embeddings=globals()["embeddings"]
+            doc_df = pd.DataFrame()
 
 
             docs = vectorstore.similarity_search_with_score(new_question_kworded, k=k_val)
@@ -545,21 +527,15 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
             score_more_limit = pd.Series(docs_scores) < vec_score_cut_off
             docs_keep = list(compress(docs, score_more_limit))
 
-            if docs_keep == []:
-                docs_keep_as_doc = []
-                docs_content = []
-                docs_url = []
-                return docs_keep_as_doc, docs_content, docs_url
+            if not docs_keep:
+                return [], pd.DataFrame(), []
 
             # Only keep sources that are at least 100 characters long
             length_more_limit = pd.Series(docs_len) >= 100
             docs_keep = list(compress(docs_keep, length_more_limit))
 
-            if docs_keep == []:
-                docs_keep_as_doc = []
-                docs_content = []
-                docs_url = []
-                return docs_keep_as_doc, docs_content, docs_url
+            if not docs_keep:
+                return [], pd.DataFrame(), []
 
             docs_keep_as_doc = [x[0] for x in docs_keep]
             docs_keep_length = len(docs_keep_as_doc)
@@ -762,6 +738,8 @@ def get_expanded_passages(vectorstore, docs, width):
 
         expanded_doc = (Document(page_content=content_str[0], metadata=meta_full[0]), score)
         expanded_docs.append(expanded_doc)
+
+    doc_df = pd.DataFrame()
 
     doc_df = create_doc_df(expanded_docs)  # Assuming you've defined the 'create_doc_df' function elsewhere
 
