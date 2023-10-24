@@ -25,7 +25,7 @@ import pandas as pd
 import dateutil.parser
 from typing import TypeVar, List
 
-from langchain.embeddings import HuggingFaceInstructEmbeddings, HuggingFaceEmbeddings
+from langchain.embeddings import HuggingFaceEmbeddings # HuggingFaceInstructEmbeddings, 
 from langchain.vectorstores.faiss import FAISS
 from langchain.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -462,6 +462,14 @@ def html_text_to_docs(texts, metadatas, chunk_size:int = chunk_size):
 
     return documents
 
+def write_out_metadata_as_string(metadata_in):
+    # If metadata_in is a single dictionary, wrap it in a list
+    if isinstance(metadata_in, dict):
+        metadata_in = [metadata_in]
+
+    metadata_string = [f"{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}" for d in metadata_in] # ['metadata']
+    return metadata_string
+
 def csv_excel_text_to_docs(df, text_column='text', chunk_size=None) -> List[Document]:
     """Converts a DataFrame's content to a list of Documents with metadata."""
     
@@ -479,6 +487,10 @@ def csv_excel_text_to_docs(df, text_column='text', chunk_size=None) -> List[Docu
             if col != text_column:
                 metadata[col] = value
 
+        metadata_string = write_out_metadata_as_string(metadata)[0]
+
+        
+
         # If chunk_size is provided, split the text into chunks
         if chunk_size:
             # Assuming you have a text splitter function similar to the PDF handling
@@ -487,14 +499,17 @@ def csv_excel_text_to_docs(df, text_column='text', chunk_size=None) -> List[Docu
                 # Other arguments as required by the splitter
             )
             sections = text_splitter.split_text(doc_content)
+
             
             # For each section, create a Document object
             for i, section in enumerate(sections):
+                section = '. '.join([metadata_string, section])
                 doc = Document(page_content=section, 
                                metadata={**metadata, "section": i, "row_section": f"{metadata['row']}-{i}"})
                 doc_sections.append(doc)
         else:
             # If no chunk_size is provided, create a single Document object for the row
+            doc_content = '. '.join([metadata_string, doc_content])
             doc = Document(page_content=doc_content, metadata=metadata)
             doc_sections.append(doc)
     
@@ -559,16 +574,16 @@ def docs_elements_from_csv_save(docs_path="documents.csv"):
 
 # ## Create embeddings and save faiss vector store to the path specified in `save_to`
 
-def load_embeddings(model_name = "thenlper/gte-base"):
+def load_embeddings(model_name = "BAAI/bge-base-en-v1.5"):
 
-    if model_name == "hkunlp/instructor-large":
-        embeddings_func = HuggingFaceInstructEmbeddings(model_name=model_name,
-        embed_instruction="Represent the paragraph for retrieval: ",
-        query_instruction="Represent the question for retrieving supporting documents: "
-        )
+    #if model_name == "hkunlp/instructor-large":
+    #    embeddings_func = HuggingFaceInstructEmbeddings(model_name=model_name,
+    #    embed_instruction="Represent the paragraph for retrieval: ",
+    #    query_instruction="Represent the question for retrieving supporting documents: "
+    #    )
 
-    else: 
-        embeddings_func = HuggingFaceEmbeddings(model_name=model_name)
+    #else: 
+    embeddings_func = HuggingFaceEmbeddings(model_name=model_name)
 
     global embeddings
 
@@ -576,7 +591,7 @@ def load_embeddings(model_name = "thenlper/gte-base"):
 
     return embeddings_func
 
-def embed_faiss_save_to_zip(docs_out, save_to="faiss_lambeth_census_embedding", model_name = "thenlper/gte-base"):
+def embed_faiss_save_to_zip(docs_out, save_to="faiss_lambeth_census_embedding", model_name = "BAAI/bge-base-en-v1.5"):
 
     load_embeddings(model_name=model_name)
 

@@ -308,6 +308,10 @@ QUESTION: {question}
 
     return INSTRUCTION_PROMPT, CONTENT_PROMPT
 
+def write_out_metadata_as_string(metadata_in):
+    metadata_string = [f"{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}" for d in metadata_in] # ['metadata']
+    return metadata_string
+
 def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings): # , 
         
         question =  inputs["question"]
@@ -317,7 +321,7 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
         new_question_kworded = adapt_q_from_chat_history(question, chat_history, extracted_memory) # new_question_keywords, 
         
        
-        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 10, out_passages = 2,
+        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 25, out_passages = 2,
                                                                           vec_score_cut_off = 1, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
                                                                           #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
         
@@ -333,12 +337,14 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
         
  
         # Build up sources content to add to user display
+        doc_df['meta_clean'] = write_out_metadata_as_string(doc_df["metadata"]) # [f"<b>{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}</b>" for d in doc_df['metadata']]
+        
+        # Remove meta text from the page content if it already exists there
+        doc_df['page_content_no_meta'] = doc_df.apply(lambda row: row['page_content'].replace(row['meta_clean'] + ". ", ""), axis=1)
+        doc_df['content_meta'] = doc_df['meta_clean'].astype(str) + ".<br><br>" + doc_df['page_content_no_meta'].astype(str)
 
-        doc_df['meta_clean'] = [f"<b>{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}</b>" for d in doc_df['metadata']]
-        doc_df['content_meta'] = doc_df['meta_clean'].astype(str) + ".<br><br>" + doc_df['page_content'].astype(str)
-
-        #modified_page_content = [f" SOURCE {i+1} - {word}" for i, word in enumerate(doc_df['page_content'])]
-        modified_page_content = [f" SOURCE {i+1} - {word}" for i, word in enumerate(doc_df['content_meta'])]
+        #modified_page_content = [f" Document {i+1} - {word}" for i, word in enumerate(doc_df['page_content'])]
+        modified_page_content = [f" Document {i+1} - {word}" for i, word in enumerate(doc_df['content_meta'])]
         docs_content_string = '<br><br>'.join(modified_page_content)
 
         sources_docs_content_string = '<br><br>'.join(doc_df['content_meta'])#.replace("  "," ")#.strip()

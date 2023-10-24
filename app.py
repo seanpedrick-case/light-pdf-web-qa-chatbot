@@ -8,7 +8,7 @@ import os
 os.system("pip install gradio==3.42.0")
 
 from typing import TypeVar
-from langchain.embeddings import HuggingFaceEmbeddings, HuggingFaceInstructEmbeddings
+from langchain.embeddings import HuggingFaceEmbeddings#, HuggingFaceInstructEmbeddings
 from langchain.vectorstores import FAISS
 import gradio as gr
 
@@ -29,17 +29,17 @@ import chatfuncs.ingest as ing
 
 embeddings_name = "BAAI/bge-base-en-v1.5"
 
-def load_embeddings(embeddings_name = "thenlper/gte-base"):
+def load_embeddings(embeddings_name = "BAAI/bge-base-en-v1.5"):
 
 
-    if embeddings_name == "hkunlp/instructor-large":
-        embeddings_func = HuggingFaceInstructEmbeddings(model_name=embeddings_name,
-        embed_instruction="Represent the paragraph for retrieval: ",
-        query_instruction="Represent the question for retrieving supporting documents: "
-        )
+    #if embeddings_name == "hkunlp/instructor-large":
+    #    embeddings_func = HuggingFaceInstructEmbeddings(model_name=embeddings_name,
+    #    embed_instruction="Represent the paragraph for retrieval: ",
+    #    query_instruction="Represent the question for retrieving supporting documents: "
+    #    )
 
-    else: 
-        embeddings_func = HuggingFaceEmbeddings(model_name=embeddings_name)
+    #else: 
+    embeddings_func = HuggingFaceEmbeddings(model_name=embeddings_name)
 
     global embeddings
 
