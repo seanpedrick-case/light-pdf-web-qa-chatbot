@@ -1,8 +1,9 @@
 langchain
+langchain-community
 beautifulsoup4
 pandas
 transformers
---extra-index-url https://download.pytorch.org/whl/cu113
+--extra-index-url https://download.pytorch.org/whl/cu118
 torch
 sentence_transformers
 faiss-cpu
@@ -12,5 +13,5 @@ ctransformers[cuda]
 keybert
 span_marker
 gensim
-gradio==3.42.0
+gradio==3.50.0
 gradio_client

@@ -1,21 +1,4 @@
-# ---
-# jupyter:
-#   jupytext:
-#     formats: ipynb,py:light
-#     text_representation:
-#       extension: .py
-#       format_name: light
-#       format_version: '1.5'
-#       jupytext_version: 1.14.6
-#   kernelspec:
-#     display_name: Python 3 (ipykernel)
-#     language: python
-#     name: python3
-# ---
-
-# # Ingest website to FAISS
-
-# ## Install/ import stuff we need
+# Import package
 
 import os
 from pathlib import Path
@@ -23,11 +6,11 @@ import re
 import requests
 import pandas as pd
 import dateutil.parser
-from typing import TypeVar, List
+from typing import Type, List
 
-from langchain.embeddings import HuggingFaceEmbeddings # HuggingFaceInstructEmbeddings, 
-from langchain.vectorstores.faiss import FAISS
-from langchain.vectorstores import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings # HuggingFaceInstructEmbeddings, 
+from langchain_community.vectorstores.faiss import FAISS
+#from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 
@@ -35,8 +18,7 @@ from bs4 import BeautifulSoup
 from docx import Document as Doc
 from pypdf import PdfReader
 
-PandasDataFrame = TypeVar('pd.core.frame.DataFrame')
-# -
+PandasDataFrame = Type[pd.DataFrame]
 
 split_strat = ["\n\n", "\n", ". ", "! ", "? "]
 chunk_size = 500

@@ -1,7 +1,7 @@
 import re
 import os
 import datetime
-from typing import TypeVar, Dict, List, Tuple
+from typing import Type, Dict, List, Tuple
 import time
 from itertools import compress
 import pandas as pd
@@ -17,8 +17,8 @@ from transformers import pipeline, TextIteratorStreamer
 
 # Langchain functions
 from langchain.prompts import PromptTemplate
-from langchain.vectorstores import FAISS
-from langchain.retrievers import SVMRetriever 
+from langchain_community.vectorstores import FAISS
+from langchain_community.retrievers import SVMRetriever 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 
@@ -42,7 +42,7 @@ import gradio as gr
 
 torch.cuda.empty_cache()
 
-PandasDataFrame = TypeVar('pd.core.frame.DataFrame')
+PandasDataFrame = Type[pd.DataFrame]
 
 embeddings = None  # global variable setup
 vectorstore = None # global variable setup
@@ -571,6 +571,8 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
             vec_rank = [*range(1, docs_keep_length+1)]
             vec_score = [(docs_keep_length/x)*vec_weight for x in vec_rank]
 
+            print("Number of documents remaining: ", docs_keep_length)
+            
             # 2nd level check on retrieved docs with BM25
 
             content_keep=[]
@@ -610,6 +612,7 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
                         bm25_score.append((docs_keep_length/x)*bm25_weight)
 
             # 3rd level check on retrieved docs with SVM retriever
+
             svm_retriever = SVMRetriever.from_texts(content_keep, embeddings, k = k_val)
             svm_result = svm_retriever.get_relevant_documents(new_question_kworded)
 

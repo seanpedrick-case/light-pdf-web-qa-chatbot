@@ -1,23 +1,17 @@
-# # Load in packages
+# Load in packages
 
-# +
 import os
 
-# Need to overwrite version of gradio present in Huggingface spaces as it doesn't have like buttons/avatars (Oct 2023)
-#os.system("pip uninstall -y gradio")
-os.system("pip install gradio==3.42.0")
-
-from typing import TypeVar
-from langchain.embeddings import HuggingFaceEmbeddings#, HuggingFaceInstructEmbeddings
-from langchain.vectorstores import FAISS
+from typing import Type
+from langchain_community.embeddings import HuggingFaceEmbeddings#, HuggingFaceInstructEmbeddings
+from langchain_community.vectorstores import FAISS
 import gradio as gr
+import pandas as pd
 
 from transformers import AutoTokenizer
-
-# Alternative model sources
 from ctransformers import AutoModelForCausalLM
 
-PandasDataFrame = TypeVar('pd.core.frame.DataFrame')
+PandasDataFrame = Type[pd.DataFrame]
 
 # Disable cuda devices if necessary
 #os.environ['CUDA_VISIBLE_DEVICES'] = '-1' 
@@ -29,16 +23,8 @@ import chatfuncs.ingest as ing
 
 embeddings_name = "BAAI/bge-base-en-v1.5"
 
-def load_embeddings(embeddings_name = "BAAI/bge-base-en-v1.5"):
+def load_embeddings(embeddings_name = embeddings_name):
 
-
-    #if embeddings_name == "hkunlp/instructor-large":
-    #    embeddings_func = HuggingFaceInstructEmbeddings(model_name=embeddings_name,
-    #    embed_instruction="Represent the paragraph for retrieval: ",
-    #    query_instruction="Represent the question for retrieving supporting documents: "
-    #    )
-
-    #else: 
     embeddings_func = HuggingFaceEmbeddings(model_name=embeddings_name)
 
     global embeddings
@@ -139,8 +125,8 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     return model_type, load_confirmation, model_type
 
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
-#model_type = "Mistral Open Orca (larger, slow)"
-#load_model(model_type, chatf.gpu_layers, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
+model_type = "Mistral Open Orca (larger, slow)"
+load_model(model_type, chatf.gpu_layers, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
 model_type = "Flan Alpaca (small, fast)"
 load_model(model_type, 0, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
@@ -170,8 +156,8 @@ with block:
     ingest_docs = gr.State()
 
     model_type_state = gr.State(model_type)
-    embeddings_state = gr.State(globals()["embeddings"])
-    vectorstore_state = gr.State(globals()["vectorstore"])  
+    embeddings_state = gr.State(chatf.embeddings)#globals()["embeddings"])
+    vectorstore_state = gr.State(chatf.vectorstore)#globals()["vectorstore"])  
 
     model_state = gr.State() # chatf.model (gives error)
     tokenizer_state = gr.State() # chatf.tokenizer (gives error)
@@ -213,8 +199,7 @@ with block:
                 "What are the 2030 outcomes for Lambeth?"])
 
         
-        current_topic = gr.Textbox(label="Feature currently disabled - Keywords related to current conversation topic.", placeholder="Keywords related to the conversation topic will appear here")
-            
+        current_topic = gr.Textbox(label="Feature currently disabled - Keywords related to current conversation topic.", placeholder="Keywords related to the conversation topic will appear here")      
 
 
     with gr.Tab("Load in a different file to chat with"):
@@ -242,7 +227,7 @@ with block:
             model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Mistral Open Orca (larger, slow)"])
             change_model_button = gr.Button(value="Load model", scale=0)
         with gr.Accordion("Choose number of model layers to send to GPU (WARNING: please don't modify unless you are sure you have a GPU).", open = False):
-            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU.", value=0, minimum=0, maximum=5, step = 1, visible=True)
+            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU.", value=0, minimum=0, maximum=100, step = 1, visible=True)
             
         load_text = gr.Text(label="Load status")
         
