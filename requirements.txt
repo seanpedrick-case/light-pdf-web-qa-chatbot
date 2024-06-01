@@ -13,7 +13,7 @@ python-docx
 keybert
 span_marker
 gensim
-gradio==4.31.5
+gradio==3.50.2
 gradio_client
 nltk
 scipy<1.13
