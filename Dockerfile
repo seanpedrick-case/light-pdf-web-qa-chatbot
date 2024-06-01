@@ -13,13 +13,14 @@ USER user
 # Set home to the user's home directory
 ENV HOME=/home/user \
 	PATH=/home/user/.local/bin:$PATH \
-    PYTHONPATH=$HOME/app \
+    	PYTHONPATH=$HOME/app \
 	PYTHONUNBUFFERED=1 \
 	GRADIO_ALLOW_FLAGGING=never \
 	GRADIO_NUM_PORTS=1 \
 	GRADIO_SERVER_NAME=0.0.0.0 \
 	GRADIO_THEME=huggingface \
-	SYSTEM=spaces
+	SYSTEM=spaces \
+	LLAMA_CUBLAS=1
  
 # Set the working directory to the user's home directory
 WORKDIR $HOME/app

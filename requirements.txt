@@ -3,15 +3,18 @@ langchain-community
 beautifulsoup4
 pandas
 transformers
---extra-index-url https://download.pytorch.org/whl/cu118
-torch
+llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+#torch \
+#--extra-index-url https://download.pytorch.org/whl/cu121
 sentence_transformers
 faiss-cpu
 pypdf
 python-docx
-ctransformers[cuda]
+#ctransformers[cuda]
 keybert
 span_marker
 gensim
-gradio==3.50.0
+gradio==4.31.5
 gradio_client
+nltk
+scipy<1.13

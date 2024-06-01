@@ -21,7 +21,7 @@ from pypdf import PdfReader
 PandasDataFrame = Type[pd.DataFrame]
 
 split_strat = ["\n\n", "\n", ". ", "! ", "? "]
-chunk_size = 500
+chunk_size = 300
 chunk_overlap = 0
 start_index = True
 

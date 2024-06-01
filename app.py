@@ -11,6 +11,12 @@ import pandas as pd
 from transformers import AutoTokenizer
 from ctransformers import AutoModelForCausalLM
 
+import torch
+
+import llama_cpp
+from llama_cpp import Llama
+from huggingface_hub import hf_hub_download  
+
 PandasDataFrame = Type[pd.DataFrame]
 
 # Disable cuda devices if necessary
@@ -38,7 +44,7 @@ def get_faiss_store(faiss_vstore_folder,embeddings):
     with zipfile.ZipFile(faiss_vstore_folder + '/' + faiss_vstore_folder + '.zip', 'r') as zip_ref:
         zip_ref.extractall(faiss_vstore_folder)
 
-    faiss_vstore = FAISS.load_local(folder_path=faiss_vstore_folder, embeddings=embeddings)
+    faiss_vstore = FAISS.load_local(folder_path=faiss_vstore_folder, embeddings=embeddings, allow_dangerous_deserialization=True)
     os.remove(faiss_vstore_folder + "/index.faiss")
     os.remove(faiss_vstore_folder + "/index.pkl")
     
@@ -52,6 +58,78 @@ import chatfuncs.chatfuncs as chatf
 
 chatf.embeddings = load_embeddings(embeddings_name)
 chatf.vectorstore = get_faiss_store(faiss_vstore_folder="faiss_embedding",embeddings=globals()["embeddings"])
+
+# def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_device=None):
+#     print("Loading model")
+
+#     # Default values inside the function
+#     if gpu_config is None:
+#         gpu_config = chatf.gpu_config
+#     if cpu_config is None:
+#         cpu_config = chatf.cpu_config
+#     if torch_device is None:
+#         torch_device = chatf.torch_device
+
+#     if model_type == "Mistral Open Orca (larger, slow)":
+#         if torch_device == "cuda":
+#             gpu_config.update_gpu(gpu_layers)
+#         else:
+#             gpu_config.update_gpu(gpu_layers)
+#             cpu_config.update_gpu(gpu_layers)
+
+#         print("Loading with", cpu_config.gpu_layers, "model layers sent to GPU.")
+
+#         print(vars(gpu_config))
+#         print(vars(cpu_config))
+
+#         try:
+#             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+#             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+#             model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+#             #model = AutoModelForCausalLM.from_pretrained('TheBloke/MistralLite-7B-GGUF', model_type='mistral', model_file='mistrallite.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+        
+#         except:
+#             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
+#             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
+#             model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
+#             #model = AutoModelForCausalLM.from_pretrained('TheBloke/MistralLite-7B-GGUF', model_type='mistral', model_file='mistrallite.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
+
+#         tokenizer = []
+
+#     if model_type == "Flan Alpaca (small, fast)":
+#         # Huggingface chat model
+#         hf_checkpoint = 'declare-lab/flan-alpaca-large'#'declare-lab/flan-alpaca-base' # # #
+        
+#         def create_hf_model(model_name):
+
+#             from transformers import AutoModelForSeq2SeqLM,  AutoModelForCausalLM
+            
+#             if torch_device == "cuda":
+#                 if "flan" in model_name:
+#                     model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")
+#                 else:
+#                     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+#             else:
+#                 if "flan" in model_name:
+#                     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+#                 else: 
+#                     model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
+
+#             tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = chatf.context_length)
+
+#             return model, tokenizer, model_type
+
+#         model, tokenizer, model_type = create_hf_model(model_name = hf_checkpoint)
+
+#     chatf.model = model
+#     chatf.tokenizer = tokenizer
+#     chatf.model_type = model_type
+
+#     load_confirmation = "Finished loading model: " + model_type
+
+#     print(load_confirmation)
+#     return model_type, load_confirmation, model_type
+
 
 def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_device=None):
     print("Loading model")
@@ -67,26 +145,35 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     if model_type == "Mistral Open Orca (larger, slow)":
         if torch_device == "cuda":
             gpu_config.update_gpu(gpu_layers)
+            print("Loading with", gpu_config.n_gpu_layers, "model layers sent to GPU.")
         else:
             gpu_config.update_gpu(gpu_layers)
             cpu_config.update_gpu(gpu_layers)
 
-        print("Loading with", cpu_config.gpu_layers, "model layers sent to GPU.")
+            print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU.")
 
         print(vars(gpu_config))
         print(vars(cpu_config))
 
         try:
-            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-            model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-            #model = AutoModelForCausalLM.from_pretrained('TheBloke/MistralLite-7B-GGUF', model_type='mistral', model_file='mistrallite.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
+            model = Llama(
+            model_path=hf_hub_download(
+            repo_id=os.environ.get("REPO_ID", "TheBloke/Mistral-7B-OpenOrca-GGUF"),
+            filename=os.environ.get("MODEL_FILE", "mistral-7b-openorca.Q4_K_M.gguf"),
+        ),
+        **vars(gpu_config) # change n_gpu_layers if you have more or less VRAM 
+        )
         
-        except:
-            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
-            #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
-            model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
-            #model = AutoModelForCausalLM.from_pretrained('TheBloke/MistralLite-7B-GGUF', model_type='mistral', model_file='mistrallite.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
+        except Exception as e:
+            print("GPU load failed")
+            print(e)
+            model = Llama(
+            model_path=hf_hub_download(
+            repo_id=os.environ.get("REPO_ID", "TheBloke/Mistral-7B-OpenOrca-GGUF"),
+            filename=os.environ.get("MODEL_FILE", "mistral-7b-openorca.Q4_K_M.gguf"),
+        ),
+        **vars(cpu_config)
+        )
 
         tokenizer = []
 
@@ -100,14 +187,14 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
             
             if torch_device == "cuda":
                 if "flan" in model_name:
-                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")
+                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto", torch_dtype=torch.float16)
                 else:
-                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", torch_dtype=torch.float16)
             else:
                 if "flan" in model_name:
-                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.float16)
                 else: 
-                    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
+                    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, torch_dtype=torch.float16)
 
             tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = chatf.context_length)
 
@@ -179,7 +266,7 @@ with block:
             #chat_height = 500
             chatbot = gr.Chatbot(avatar_images=('user.jfif', 'bot.jpg'),bubble_full_width = False, scale = 1) # , height=chat_height
             with gr.Accordion("Open this tab to see the source paragraphs used to generate the answer", open = False):
-                sources = gr.HTML(value = "Source paragraphs with the most relevant text will appear here", scale = 1) # , height=chat_height
+                sources = gr.HTML(value = "Source paragraphs with the most relevant text will appear here") # , height=chat_height
 
         with gr.Row():
             message = gr.Textbox(
@@ -233,7 +320,7 @@ with block:
         
 
     gr.HTML(
-        "<center>This app is based on the models Flan Alpaca and Mistral Open Orca. It powered by Gradio, Transformers, Ctransformers, and Langchain.</a></center>"
+        "<center>This app is based on the models Flan Alpaca and Mistral Open Orca. It powered by Gradio, Transformers, and Llama.cpp.</a></center>"
     )
 
     examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
@@ -289,6 +376,4 @@ with block:
     # Thumbs up or thumbs down voting function
     chatbot.like(chatf.vote, [chat_history_state, instruction_prompt_out, model_type_state], None)
 
-block.queue(concurrency_count=1).launch(debug=True)
-# -
-
+block.queue().launch(debug=True)
