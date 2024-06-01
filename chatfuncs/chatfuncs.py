@@ -99,66 +99,17 @@ context_length:int = 2048
 sample = True
 
 
-# class CtransInitConfig_gpu:
-#     def __init__(self, temperature=temperature,
-#                  top_k=top_k,
-#                  top_p=top_p,
-#                  repetition_penalty=repetition_penalty,
-#                  last_n_tokens=last_n_tokens,
-#                  max_new_tokens=max_new_tokens,
-#                  seed=seed,
-#                  reset=reset,
-#                  stream=stream,
-#                  threads=threads,
-#                  batch_size=batch_size,
-#                  context_length=context_length,
-#                  gpu_layers=gpu_layers):
-#         self.temperature = temperature
-#         self.top_k = top_k
-#         self.top_p = top_p
-#         self.repetition_penalty = repetition_penalty# repetition_penalty
-#         self.last_n_tokens = last_n_tokens
-#         self.max_new_tokens = max_new_tokens
-#         self.seed = seed
-#         self.reset = reset
-#         self.stream = stream
-#         self.threads = threads
-#         self.batch_size = batch_size
-#         self.context_length = context_length
-#         self.gpu_layers = gpu_layers
-#         # self.stop: list[str] = field(default_factory=lambda: [stop_string])
-
-#     def update_gpu(self, new_value):
-#         self.gpu_layers = new_value
-
-# class CtransInitConfig_cpu(CtransInitConfig_gpu):
-#     def __init__(self):
-#         super().__init__()
-#         self.gpu_layers = 0
-
 class CtransInitConfig_gpu:
-    def __init__(self, #temperature=temperature,
-                 #top_k=top_k,
-                 #top_p=top_p,
-                 #repetition_penalty=repetition_penalty,
+    def __init__(self,
                  last_n_tokens=last_n_tokens,
-                 #max_new_tokens=max_new_tokens,
                  seed=seed,
-                 #reset=reset,
-                 #stream=stream,
                  n_threads=threads,
                  n_batch=batch_size,
                  n_ctx=4096,
                  n_gpu_layers=gpu_layers):
-        #self.temperature = temperature
-        #self.top_k = top_k
-        #self.top_p = top_p
-        #self.repetition_penalty = repetition_penalty# repetition_penalty
+
         self.last_n_tokens = last_n_tokens
-        #self.max_new_tokens = max_new_tokens
         self.seed = seed
-        #self.reset = reset
-        #self.stream = stream
         self.n_threads = n_threads
         self.n_batch = n_batch
         self.n_ctx = n_ctx
@@ -177,51 +128,22 @@ gpu_config = CtransInitConfig_gpu()
 cpu_config = CtransInitConfig_cpu()
 
 
-# class CtransGenGenerationConfig:
-#     def __init__(self, temperature=temperature,
-#                  top_k=top_k,
-#                  top_p=top_p,
-#                  repetition_penalty=repetition_penalty,
-#                  last_n_tokens=last_n_tokens,
-#                  seed=seed,
-#                  threads=threads,
-#                  batch_size=batch_size,
-#                  reset=True
-#                  ):
-#         self.temperature = temperature
-#         self.top_k = top_k
-#         self.top_p = top_p
-#         self.repetition_penalty = repetition_penalty# repetition_penalty
-#         self.last_n_tokens = last_n_tokens
-#         self.seed = seed
-#         self.threads = threads
-#         self.batch_size = batch_size
-#         self.reset = reset
-
 class CtransGenGenerationConfig:
     def __init__(self, temperature=temperature,
                  top_k=top_k,
                  top_p=top_p,
                  repeat_penalty=repetition_penalty,
-                 #last_n_tokens=last_n_tokens,
                  seed=seed,
                  stream=stream,
                  max_tokens=max_new_tokens
-                 #threads=threads,
-                 #batch_size=batch_size,
-                 #reset=True
                  ):
         self.temperature = temperature
         self.top_k = top_k
         self.top_p = top_p
         self.repeat_penalty = repeat_penalty
-        #self.last_n_tokens = last_n_tokens
         self.seed = seed
         self.max_tokens=max_tokens
         self.stream = stream
-        #self.threads = threads
-        #self.batch_size = batch_size
-        #self.reset = reset
 
     def update_temp(self, new_value):
         self.temperature = new_value
@@ -417,93 +339,6 @@ def create_full_prompt(user_input, history, extracted_memory, vectorstore, embed
     return history, docs_content_string, instruction_prompt_out
 
 # Chat functions
-# def produce_streaming_answer_chatbot(history, full_prompt, model_type,
-#             temperature=temperature,
-#             max_new_tokens=max_new_tokens,
-#             sample=sample,
-#             repetition_penalty=repetition_penalty,
-#             top_p=top_p,
-#             top_k=top_k
-# ):
-#     #print("Model type is: ", model_type)
-
-#     #if not full_prompt.strip():
-#     #    if history is None:
-#     #        history = []
-
-#     #    return history
-
-#     if model_type == "Flan Alpaca (small, fast)": 
-#         # Get the model and tokenizer, and tokenize the user text.
-#         model_inputs = tokenizer(text=full_prompt, return_tensors="pt", return_attention_mask=False).to(torch_device) # return_attention_mask=False was added
-
-#         # Start generation on a separate thread, so that we don't block the UI. The text is pulled from the streamer
-#         # in the main thread. Adds timeout to the streamer to handle exceptions in the generation thread.
-#         streamer = TextIteratorStreamer(tokenizer, timeout=120., skip_prompt=True, skip_special_tokens=True)
-#         generate_kwargs = dict(
-#             model_inputs,
-#             streamer=streamer,
-#             max_new_tokens=max_new_tokens,
-#             do_sample=sample,
-#             repetition_penalty=repetition_penalty,
-#             top_p=top_p,
-#             temperature=temperature,
-#             top_k=top_k
-#         )
-
-#         print(generate_kwargs)
-
-#         t = Thread(target=model.generate, kwargs=generate_kwargs)
-#         t.start()
-
-#         # Pull the generated text from the streamer, and update the model output.
-#         start = time.time()
-#         NUM_TOKENS=0
-#         print('-'*4+'Start Generation'+'-'*4)
-
-#         history[-1][1] = ""
-#         for new_text in streamer:
-#             if new_text == None: new_text = ""
-#             history[-1][1] += new_text
-#             NUM_TOKENS+=1
-#             yield history
-            
-#         time_generate = time.time() - start
-#         print('\n')
-#         print('-'*4+'End Generation'+'-'*4)
-#         print(f'Num of generated tokens: {NUM_TOKENS}')
-#         print(f'Time for complete generation: {time_generate}s')
-#         print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
-#         print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
-
-#     elif model_type == "Mistral Open Orca (larger, slow)":
-#         tokens = model.tokenize(full_prompt)
-
-#         gen_config = CtransGenGenerationConfig()
-#         gen_config.update_temp(temperature)
-
-#         print(vars(gen_config))
-
-#         # Pull the generated text from the streamer, and update the model output.
-#         start = time.time()
-#         NUM_TOKENS=0
-#         print('-'*4+'Start Generation'+'-'*4)
-
-#         history[-1][1] = ""
-#         for new_text in model.generate(tokens, **vars(gen_config)): #CtransGen_generate(prompt=full_prompt)#, config=CtransGenGenerationConfig()): # #top_k=top_k, temperature=temperature, repetition_penalty=repetition_penalty,
-#             if new_text == None: new_text =  ""
-#             history[-1][1] += model.detokenize(new_text) #new_text
-#             NUM_TOKENS+=1
-#             yield history
-        
-#         time_generate = time.time() - start
-#         print('\n')
-#         print('-'*4+'End Generation'+'-'*4)
-#         print(f'Num of generated tokens: {NUM_TOKENS}')
-#         print(f'Time for complete generation: {time_generate}s')
-#         print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
-#         print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
-
 
 def produce_streaming_answer_chatbot(history, full_prompt, model_type,
             temperature=temperature,
@@ -523,8 +358,8 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type,
 
     if model_type == "Flan Alpaca (small, fast)": 
         # Get the model and tokenizer, and tokenize the user text.
-        model_inputs = tokenizer(text=full_prompt, return_tensors="pt", return_attention_mask=False).to(torch_device) # return_attention_mask=False was added
-
+        model_inputs = tokenizer(text=full_prompt, return_tensors="pt", return_attention_mask=False).to(torch_device)
+        
         # Start generation on a separate thread, so that we don't block the UI. The text is pulled from the streamer
         # in the main thread. Adds timeout to the streamer to handle exceptions in the generation thread.
         streamer = TextIteratorStreamer(tokenizer, timeout=120., skip_prompt=True, skip_special_tokens=True)
@@ -551,10 +386,13 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type,
 
         history[-1][1] = ""
         for new_text in streamer:
-            if new_text == None: new_text = ""
-            history[-1][1] += new_text
-            NUM_TOKENS+=1
-            yield history
+            try:
+                if new_text == None: new_text = ""
+                history[-1][1] += new_text
+                NUM_TOKENS+=1
+                yield history
+            except Exception as e:
+                print(f"Error during text generation: {e}")
             
         time_generate = time.time() - start
         print('\n')
@@ -566,8 +404,6 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type,
 
     elif model_type == "Mistral Open Orca (larger, slow)":
         #tokens = model.tokenize(full_prompt)
-
-        temp = ""
 
         gen_config = CtransGenGenerationConfig()
         gen_config.update_temp(temperature)

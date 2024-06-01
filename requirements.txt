@@ -2,15 +2,14 @@ langchain
 langchain-community
 beautifulsoup4
 pandas
-transformers
+transformers==4.34.0
 llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
-#torch \
-#--extra-index-url https://download.pytorch.org/whl/cu121
-sentence_transformers
-faiss-cpu
+torch \
+--extra-index-url https://download.pytorch.org/whl/cu121
+sentence_transformers==2.2.2
+faiss-cpu==1.7.4
 pypdf
 python-docx
-#ctransformers[cuda]
 keybert
 span_marker
 gensim
