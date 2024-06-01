@@ -9,11 +9,8 @@ import gradio as gr
 import pandas as pd
 
 from transformers import AutoTokenizer
-from ctransformers import AutoModelForCausalLM
-
 import torch
 
-import llama_cpp
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download  
 
@@ -58,77 +55,6 @@ import chatfuncs.chatfuncs as chatf
 
 chatf.embeddings = load_embeddings(embeddings_name)
 chatf.vectorstore = get_faiss_store(faiss_vstore_folder="faiss_embedding",embeddings=globals()["embeddings"])
-
-# def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_device=None):
-#     print("Loading model")
-
-#     # Default values inside the function
-#     if gpu_config is None:
-#         gpu_config = chatf.gpu_config
-#     if cpu_config is None:
-#         cpu_config = chatf.cpu_config
-#     if torch_device is None:
-#         torch_device = chatf.torch_device
-
-#     if model_type == "Mistral Open Orca (larger, slow)":
-#         if torch_device == "cuda":
-#             gpu_config.update_gpu(gpu_layers)
-#         else:
-#             gpu_config.update_gpu(gpu_layers)
-#             cpu_config.update_gpu(gpu_layers)
-
-#         print("Loading with", cpu_config.gpu_layers, "model layers sent to GPU.")
-
-#         print(vars(gpu_config))
-#         print(vars(cpu_config))
-
-#         try:
-#             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-#             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-#             model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-#             #model = AutoModelForCausalLM.from_pretrained('TheBloke/MistralLite-7B-GGUF', model_type='mistral', model_file='mistrallite.Q4_K_M.gguf', **vars(gpu_config)) # **asdict(CtransRunConfig_cpu())
-        
-#         except:
-#             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Orca-Mini-3B-gguf', model_type='llama', model_file='q5_0-orca-mini-3b.gguf', **vars(cpu_config)) #**asdict(CtransRunConfig_gpu())
-#             #model = AutoModelForCausalLM.from_pretrained('Aryanne/Wizard-Orca-3B-gguf', model_type='llama', model_file='q4_1-wizard-orca-3b.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
-#             model = AutoModelForCausalLM.from_pretrained('TheBloke/Mistral-7B-OpenOrca-GGUF', model_type='mistral', model_file='mistral-7b-openorca.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
-#             #model = AutoModelForCausalLM.from_pretrained('TheBloke/MistralLite-7B-GGUF', model_type='mistral', model_file='mistrallite.Q4_K_M.gguf', **vars(cpu_config)) # **asdict(CtransRunConfig_cpu())
-
-#         tokenizer = []
-
-#     if model_type == "Flan Alpaca (small, fast)":
-#         # Huggingface chat model
-#         hf_checkpoint = 'declare-lab/flan-alpaca-large'#'declare-lab/flan-alpaca-base' # # #
-        
-#         def create_hf_model(model_name):
-
-#             from transformers import AutoModelForSeq2SeqLM,  AutoModelForCausalLM
-            
-#             if torch_device == "cuda":
-#                 if "flan" in model_name:
-#                     model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")
-#                 else:
-#                     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
-#             else:
-#                 if "flan" in model_name:
-#                     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-#                 else: 
-#                     model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
-
-#             tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = chatf.context_length)
-
-#             return model, tokenizer, model_type
-
-#         model, tokenizer, model_type = create_hf_model(model_name = hf_checkpoint)
-
-#     chatf.model = model
-#     chatf.tokenizer = tokenizer
-#     chatf.model_type = model_type
-
-#     load_confirmation = "Finished loading model: " + model_type
-
-#     print(load_confirmation)
-#     return model_type, load_confirmation, model_type
 
 
 def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_device=None):

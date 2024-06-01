@@ -38,8 +38,6 @@ from gensim.corpora import Dictionary
 from gensim.models import TfidfModel, OkapiBM25Model
 from gensim.similarities import SparseMatrixSimilarity
 
-import copy
-import llama_cpp
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
 
