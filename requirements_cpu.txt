@@ -1,0 +1,18 @@
+langchain
+langchain-community
+beautifulsoup4
+pandas
+transformers==4.34.0
+llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+torch
+sentence_transformers==2.2.2
+faiss-cpu==1.7.4
+pypdf
+python-docx
+keybert
+span_marker
+gensim
+gradio==3.50.2
+gradio_client
+nltk
+scipy<1.13

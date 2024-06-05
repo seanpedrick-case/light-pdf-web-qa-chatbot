@@ -41,6 +41,8 @@ from gensim.similarities import SparseMatrixSimilarity
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
 
+from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3
+
 import gradio as gr
 
 torch.cuda.empty_cache()
@@ -86,10 +88,10 @@ print("CPU threads:", threads)
 temperature: float = 0.1
 top_k: int = 3
 top_p: float = 1
-repetition_penalty: float = 1.3
+repetition_penalty: float = 1.15
 flan_alpaca_repetition_penalty: float = 1.3
 last_n_tokens: int = 64
-max_new_tokens: int = 256
+max_new_tokens: int = 1024
 seed: int = 42
 reset: bool = False
 stream: bool = True
@@ -192,66 +194,12 @@ def base_prompt_templates(model_type = "Flan Alpaca (small, fast)"):
         input_variables=["page_content"]
     )
 
-# The main prompt:
-
-    instruction_prompt_template_alpaca_quote = """### Instruction:
-Quote directly from the SOURCE below that best answers the QUESTION. Only quote full sentences in the correct order. If you cannot find an answer, start your response with "My best guess is: ".
-    
-CONTENT: {summaries}   
-QUESTION: {question}
-
-Response:"""
-
-    instruction_prompt_template_alpaca = """### Instruction:
-### User:
-Answer the QUESTION using information from the following CONTENT.
-CONTENT: {summaries}
-QUESTION: {question}
-
-Response:"""
-
-
-    instruction_prompt_template_wizard_orca = """### HUMAN:
-Answer the QUESTION below based on the CONTENT. Only refer to CONTENT that directly answers the question.
-CONTENT - {summaries}
-QUESTION - {question}
-### RESPONSE:
-"""
-
-
-    instruction_prompt_template_orca = """
-### System:
-You are an AI assistant that follows instruction extremely well. Help as much as you can.
-### User:
-Answer the QUESTION with a short response using information from the following CONTENT.
-QUESTION: {question}
-CONTENT: {summaries}
-
-### Response:"""
-
-    instruction_prompt_template_orca_quote = """
-### System:
-You are an AI assistant that follows instruction extremely well. Help as much as you can.
-### User:
-Quote text from the CONTENT to answer the QUESTION below.
-QUESTION: {question}
-CONTENT: {summaries}  
-### Response:
-"""
-
-
-    instruction_prompt_mistral_orca = """<|im_start|>system\n
-You are an AI assistant that follows instruction extremely well. Help as much as you can.
-<|im_start|>user\n
-Answer the QUESTION using information from the following CONTENT. Respond with short answers that directly answer the question.
-CONTENT: {summaries}
-QUESTION: {question}\n
-Answer:<|im_end|>"""
+# The main prompt:  
 
     if model_type == "Flan Alpaca (small, fast)":
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_alpaca, input_variables=['question', 'summaries'])
-    elif model_type == "Mistral Open Orca (larger, slow)":
-        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_mistral_orca, input_variables=['question', 'summaries'])
+    elif model_type == "Phi 3 Mini (larger, slow)":
+        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_phi3, input_variables=['question', 'summaries'])
 
     return INSTRUCTION_PROMPT, CONTENT_PROMPT
 
@@ -402,7 +350,7 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type,
         print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
         print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
-    elif model_type == "Mistral Open Orca (larger, slow)":
+    elif model_type == "Phi 3 Mini (larger, slow)":
         #tokens = model.tokenize(full_prompt)
 
         gen_config = CtransGenGenerationConfig()

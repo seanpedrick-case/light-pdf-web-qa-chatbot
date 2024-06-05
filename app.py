@@ -68,7 +68,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     if torch_device is None:
         torch_device = chatf.torch_device
 
-    if model_type == "Mistral Open Orca (larger, slow)":
+    if model_type == "Phi 3 Mini (larger, slow)":
         if torch_device == "cuda":
             gpu_config.update_gpu(gpu_layers)
             print("Loading with", gpu_config.n_gpu_layers, "model layers sent to GPU.")
@@ -84,8 +84,8 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
         try:
             model = Llama(
             model_path=hf_hub_download(
-            repo_id=os.environ.get("REPO_ID", "TheBloke/Mistral-7B-OpenOrca-GGUF"),
-            filename=os.environ.get("MODEL_FILE", "mistral-7b-openorca.Q4_K_M.gguf"),
+            repo_id=os.environ.get("REPO_ID", "QuantFactory/Phi-3-mini-128k-instruct-GGUF"),# "QuantFactory/Phi-3-mini-128k-instruct-GGUF"), # "QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-v2"), #"microsoft/Phi-3-mini-4k-instruct-gguf"),#"TheBloke/Mistral-7B-OpenOrca-GGUF"),
+            filename=os.environ.get("MODEL_FILE", "Phi-3-mini-128k-instruct.Q4_K_M.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")  #"Meta-Llama-3-8B-Instruct-v2.Q6_K.gguf") #"Phi-3-mini-4k-instruct-q4.gguf")#"mistral-7b-openorca.Q4_K_M.gguf"),
         ),
         **vars(gpu_config) # change n_gpu_layers if you have more or less VRAM 
         )
@@ -95,8 +95,8 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
             print(e)
             model = Llama(
             model_path=hf_hub_download(
-            repo_id=os.environ.get("REPO_ID", "TheBloke/Mistral-7B-OpenOrca-GGUF"),
-            filename=os.environ.get("MODEL_FILE", "mistral-7b-openorca.Q4_K_M.gguf"),
+            repo_id=os.environ.get("REPO_ID", "QuantFactory/Phi-3-mini-128k-instruct-GGUF"), #"QuantFactory/Phi-3-mini-128k-instruct-GGUF"), #, "microsoft/Phi-3-mini-4k-instruct-gguf"),#"QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-v2"), #"microsoft/Phi-3-mini-4k-instruct-gguf"),#"TheBloke/Mistral-7B-OpenOrca-GGUF"),
+            filename=os.environ.get("MODEL_FILE", "Phi-3-mini-128k-instruct.Q4_K_M.gguf"), # "Phi-3-mini-128k-instruct.Q4_K_M.gguf") # , #"Meta-Llama-3-8B-Instruct-v2.Q6_K.gguf") #"Phi-3-mini-4k-instruct-q4.gguf"),#"mistral-7b-openorca.Q4_K_M.gguf"),
         ),
         **vars(cpu_config)
         )
@@ -113,14 +113,14 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
             
             if torch_device == "cuda":
                 if "flan" in model_name:
-                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")#, torch_dtype=torch.float16)
+                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto", torch_dtype=torch.float16)
                 else:
-                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")#, torch_dtype=torch.float16)
+                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", torch_dtype=torch.float16)
             else:
                 if "flan" in model_name:
-                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)#, torch_dtype=torch.float16)
+                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.float16)
                 else: 
-                    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)#, torch_dtype=torch.float16)
+                    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, torch_dtype=torch.float16)
 
             tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = chatf.context_length)
 
@@ -138,7 +138,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     return model_type, load_confirmation, model_type
 
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
-model_type = "Mistral Open Orca (larger, slow)"
+model_type = "Phi 3 Mini (larger, slow)"
 load_model(model_type, chatf.gpu_layers, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
 model_type = "Flan Alpaca (small, fast)"
@@ -180,7 +180,7 @@ with block:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown("Chat with PDF, web page or (new) csv/Excel documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Mistral Open Orca (larger, slow)), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+    gr.Markdown("Chat with PDF, web page or (new) csv/Excel documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Phi 3 Mini (larger, slow)), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
 
     with gr.Row():
         current_source = gr.Textbox(label="Current data source(s)", value="Lambeth_2030-Our_Future_Our_Lambeth.pdf", scale = 10)
@@ -235,9 +235,9 @@ with block:
 
     with gr.Tab("Advanced features"):
         out_passages = gr.Slider(minimum=1, value = 2, maximum=10, step=1, label="Choose number of passages to retrieve from the document. Numbers greater than 2 may lead to increased hallucinations or input text being truncated.")
-        temp_slide = gr.Slider(minimum=0.1, value = 0.1, maximum=1, step=0.1, label="Choose temperature setting for response generation.")
+        temp_slide = gr.Slider(minimum=0.1, value = 0.5, maximum=1, step=0.1, label="Choose temperature setting for response generation.")
         with gr.Row():
-            model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Mistral Open Orca (larger, slow)"])
+            model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Phi 3 Mini (larger, slow)"])
             change_model_button = gr.Button(value="Load model", scale=0)
         with gr.Accordion("Choose number of model layers to send to GPU (WARNING: please don't modify unless you are sure you have a GPU).", open = False):
             gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU.", value=0, minimum=0, maximum=100, step = 1, visible=True)
@@ -246,7 +246,7 @@ with block:
         
 
     gr.HTML(
-        "<center>This app is based on the models Flan Alpaca and Mistral Open Orca. It powered by Gradio, Transformers, and Llama.cpp.</a></center>"
+        "<center>This app is based on the models Flan Alpaca and Phi 3 Mini. It powered by Gradio, Transformers, and Llama.cpp.</a></center>"
     )
 
     examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
