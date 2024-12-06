@@ -573,7 +573,7 @@ def load_embeddings(model_name = "BAAI/bge-base-en-v1.5"):
 
     return embeddings_func
 
-def embed_faiss_save_to_zip(docs_out, save_to="faiss_lambeth_census_embedding", model_name = "BAAI/bge-base-en-v1.5"):
+def embed_faiss_save_to_zip(docs_out, save_to="output", model_name = "BAAI/bge-base-en-v1.5"):
 
     load_embeddings(model_name=model_name)
 
@@ -582,7 +582,9 @@ def embed_faiss_save_to_zip(docs_out, save_to="faiss_lambeth_census_embedding", 
     print(f"> Total split documents: {len(docs_out)}")
 
     vectorstore = FAISS.from_documents(documents=docs_out, embedding=embeddings)
-        
+
+    if not Path(save_to).exists(): 
+        os.mkdir(save_to)
 
     if Path(save_to).exists():
         vectorstore.save_local(folder_path=save_to)
@@ -599,9 +601,13 @@ def embed_faiss_save_to_zip(docs_out, save_to="faiss_lambeth_census_embedding", 
     os.remove(save_to + "/index.faiss")
     os.remove(save_to + "/index.pkl")
 
-    shutil.move(save_to + '.zip', save_to + "/" + save_to + '.zip')
+    save_zip_out = save_to + "/" + save_to + '.zip'
 
-    return vectorstore
+    shutil.move(save_to + '.zip', save_zip_out)
+
+    out_message = "Document processing complete"
+
+    return out_message, vectorstore, save_zip_out
 
 def docs_to_chroma_save(embeddings, docs_out:PandasDataFrame, save_to:str):
     print(f"> Total split documents: {len(docs_out)}")

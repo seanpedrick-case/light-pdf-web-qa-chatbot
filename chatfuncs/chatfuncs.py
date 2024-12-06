@@ -28,20 +28,25 @@ from langchain.docstore.document import Document
 from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
+#from nltk.stem.snowball import SnowballStemmer
 from keybert import KeyBERT
 
 # For Name Entity Recognition model
 #from span_marker import SpanMarkerModel # Not currently used
 
+
 # For BM25 retrieval
-from gensim.corpora import Dictionary
-from gensim.models import TfidfModel, OkapiBM25Model
-from gensim.similarities import SparseMatrixSimilarity
+import bm25s
+import Stemmer
+
+#from gensim.corpora import Dictionary
+#from gensim.models import TfidfModel, OkapiBM25Model
+#from gensim.similarities import SparseMatrixSimilarity
 
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
 
-from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3
+from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen
 
 import gradio as gr
 
@@ -84,7 +89,7 @@ print("Running on device:", torch_device)
 threads = 8 #torch.get_num_threads()
 print("CPU threads:", threads)
 
-# Flan Alpaca (small, fast) Model parameters
+# Qwen 2 0.5B (small, fast) Model parameters
 temperature: float = 0.1
 top_k: int = 3
 top_p: float = 1
@@ -182,7 +187,7 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 
 # Prompt functions
 
-def base_prompt_templates(model_type = "Flan Alpaca (small, fast)"):    
+def base_prompt_templates(model_type = "Qwen 2 0.5B (small, fast)"):    
   
     #EXAMPLE_PROMPT = PromptTemplate(
     #    template="\nCONTENT:\n\n{page_content}\n\nSOURCE: {source}\n\n",
@@ -196,9 +201,9 @@ def base_prompt_templates(model_type = "Flan Alpaca (small, fast)"):
 
 # The main prompt:  
 
-    if model_type == "Flan Alpaca (small, fast)":
-        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_alpaca, input_variables=['question', 'summaries'])
-    elif model_type == "Phi 3 Mini (larger, slow)":
+    if model_type == "Qwen 2 0.5B (small, fast)":
+        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_qwen, input_variables=['question', 'summaries'])
+    elif model_type == "Phi 3.5 Mini (larger, slow)":
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_phi3, input_variables=['question', 'summaries'])
 
     return INSTRUCTION_PROMPT, CONTENT_PROMPT
@@ -207,89 +212,175 @@ def write_out_metadata_as_string(metadata_in):
     metadata_string = [f"{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}" for d in metadata_in] # ['metadata']
     return metadata_string
 
-def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings, out_passages = 2): # , 
+def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings, relevant_flag = True, out_passages = 2): # , 
         
-        question =  inputs["question"]
-        chat_history = inputs["chat_history"]
-        
+    question =  inputs["question"]
+    chat_history = inputs["chat_history"]
 
-        new_question_kworded = adapt_q_from_chat_history(question, chat_history, extracted_memory) # new_question_keywords, 
-        
-       
-        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 25, out_passages = out_passages,
-                                                                          vec_score_cut_off = 0.85, vec_weight = 1, bm25_weight = 1, svm_weight = 1)#,
-                                                                          #vectorstore=globals()["vectorstore"], embeddings=globals()["embeddings"])
-        
-        #print(docs_keep_as_doc)
-        #print(doc_df)
-        if (not docs_keep_as_doc) | (doc_df.empty):
-            sorry_prompt = """Say 'Sorry, there is no relevant information to answer this question.'.
-RESPONSE:"""
-            return sorry_prompt, "No relevant sources found.", new_question_kworded
-        
-        # Expand the found passages to the neighbouring context
-        file_type = determine_file_type(doc_df['meta_url'][0])
-
-        # Only expand passages if not tabular data
-        if (file_type != ".csv") & (file_type != ".xlsx"):
-            docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=3)
-
-        
- 
-        # Build up sources content to add to user display
-        doc_df['meta_clean'] = write_out_metadata_as_string(doc_df["metadata"]) # [f"<b>{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}</b>" for d in doc_df['metadata']]
-        
-        # Remove meta text from the page content if it already exists there
-        doc_df['page_content_no_meta'] = doc_df.apply(lambda row: row['page_content'].replace(row['meta_clean'] + ". ", ""), axis=1)
-        doc_df['content_meta'] = doc_df['meta_clean'].astype(str) + ".<br><br>" + doc_df['page_content_no_meta'].astype(str)
-
-        #modified_page_content = [f" Document {i+1} - {word}" for i, word in enumerate(doc_df['page_content'])]
-        modified_page_content = [f" Document {i+1} - {word}" for i, word in enumerate(doc_df['content_meta'])]
-        docs_content_string = '<br><br>'.join(modified_page_content)
-
-        sources_docs_content_string = '<br><br>'.join(doc_df['content_meta'])#.replace("  "," ")#.strip()
-     
-        instruction_prompt_out = instruction_prompt.format(question=new_question_kworded, summaries=docs_content_string)
-        
-        print('Final prompt is: ')
-        print(instruction_prompt_out)
-                
-        return instruction_prompt_out, sources_docs_content_string, new_question_kworded
-
-def create_full_prompt(user_input, history, extracted_memory, vectorstore, embeddings, model_type, out_passages):
+    print("relevant_flag in generate_expanded_prompt:", relevant_flag)
     
-    if not user_input.strip():
-        return history, "", "Respond with 'Please enter a question.' RESPONSE:"
+    
+    if relevant_flag == True:
+        new_question_kworded = adapt_q_from_chat_history(question, chat_history, extracted_memory) # new_question_keywords, 
+        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 25, out_passages = out_passages, vec_score_cut_off = 0.85, vec_weight = 1, bm25_weight = 1, svm_weight = 1)
+    else:
+        new_question_kworded = question
+        doc_df = pd.DataFrame()
+        docs_keep_as_doc = []
+        docs_keep_out = []
+    
+    if (not docs_keep_as_doc) | (doc_df.empty):
+        sorry_prompt = """Say 'Sorry, there is no relevant information to answer this question.'"""
+        return sorry_prompt, "No relevant sources found.", new_question_kworded
+    
+    # Expand the found passages to the neighbouring context
+    print("Doc_df columns:", doc_df.columns)
 
+    if 'meta_url' in doc_df.columns:
+        file_type = determine_file_type(doc_df['meta_url'][0])
+    else:
+        file_type = determine_file_type(doc_df['source'][0]) 
+
+    # Only expand passages if not tabular data
+    if (file_type != ".csv") & (file_type != ".xlsx"):
+        docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=3)    
+
+    # Build up sources content to add to user display
+    doc_df['meta_clean'] = write_out_metadata_as_string(doc_df["metadata"]) # [f"<b>{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}</b>" for d in doc_df['metadata']]
+    
+    # Remove meta text from the page content if it already exists there
+    doc_df['page_content_no_meta'] = doc_df.apply(lambda row: row['page_content'].replace(row['meta_clean'] + ". ", ""), axis=1)
+    doc_df['content_meta'] = doc_df['meta_clean'].astype(str) + ".<br><br>" + doc_df['page_content_no_meta'].astype(str)
+
+    #modified_page_content = [f" Document {i+1} - {word}" for i, word in enumerate(doc_df['page_content'])]
+    modified_page_content = [f" Document {i+1} - {word}" for i, word in enumerate(doc_df['content_meta'])]
+    docs_content_string = '<br><br>'.join(modified_page_content)
+
+    sources_docs_content_string = '<br><br>'.join(doc_df['content_meta'])#.replace("  "," ")#.strip()
+    
+    instruction_prompt_out = instruction_prompt.format(question=new_question_kworded, summaries=docs_content_string)
+    
+    print('Final prompt is: ')
+    print(instruction_prompt_out)
+            
+    return instruction_prompt_out, sources_docs_content_string, new_question_kworded
+
+def create_full_prompt(user_input, history, extracted_memory, vectorstore, embeddings, model_type, out_passages, api_model_choice=None, api_key=None, relevant_flag = True):
+    
     #if chain_agent is None:
     #    history.append((user_input, "Please click the button to submit the Huggingface API key before using the chatbot (top right)"))
     #    return history, history, "", ""
     print("\n==== date/time: " + str(datetime.datetime.now()) + " ====")
-    print("User input: " + user_input)
+    
     
     history = history or []
-    
+
+    if api_model_choice and api_model_choice != "None":
+         print("API model choice detected")
+         if api_key:
+            print("API key detected")
+            return history, "", None, relevant_flag       
+         else:
+            return history, "", None, relevant_flag
+         
     # Create instruction prompt
     instruction_prompt, content_prompt = base_prompt_templates(model_type=model_type)
+
+    if not user_input.strip():
+        user_input = "No user input found"
+        relevant_flag = False
+    else:
+        relevant_flag = True
+
+    print("User input:", user_input)
+   
     instruction_prompt_out, docs_content_string, new_question_kworded =\
                 generate_expanded_prompt({"question": user_input, "chat_history": history}, #vectorstore,
-                                    instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings, out_passages)
-    
+                                    instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings, relevant_flag, out_passages)
   
     history.append(user_input)
     
-    print("Output history is:")
-    print(history)
-
-    print("Final prompt to model is:")
-    print(instruction_prompt_out)
+    print("Output history is:", history)
+    print("Final prompt to model is:",instruction_prompt_out)
         
-    return history, docs_content_string, instruction_prompt_out
+    return history, docs_content_string, instruction_prompt_out, relevant_flag
 
 # Chat functions
+import boto3
+import json
+from chatfuncs.helper_functions import get_or_create_env_var
 
-def produce_streaming_answer_chatbot(history, full_prompt, model_type,
+# ResponseObject class for AWS Bedrock calls
+class ResponseObject:
+        def __init__(self, text, usage_metadata):
+            self.text = text
+            self.usage_metadata = usage_metadata
+
+max_tokens = 4096
+
+AWS_DEFAULT_REGION = get_or_create_env_var('AWS_DEFAULT_REGION', 'eu-west-2')
+print(f'The value of AWS_DEFAULT_REGION is {AWS_DEFAULT_REGION}')
+
+bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_DEFAULT_REGION)
+
+def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice: str) -> ResponseObject:
+    """
+    This function sends a request to AWS Claude with the following parameters:
+    - prompt: The user's input prompt to be processed by the model.
+    - system_prompt: A system-defined prompt that provides context or instructions for the model.
+    - temperature: A value that controls the randomness of the model's output, with higher values resulting in more diverse responses.
+    - max_tokens: The maximum number of tokens (words or characters) in the model's response.
+    - model_choice: The specific model to use for processing the request.
+    
+    The function constructs the request configuration, invokes the model, extracts the response text, and returns a ResponseObject containing the text and metadata.
+    """
+
+    prompt_config = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_tokens,
+        "top_p": 0.999,
+        "temperature":temperature,
+        "system": system_prompt,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
+    }
+
+    body = json.dumps(prompt_config)
+
+    modelId = model_choice
+    accept = "application/json"
+    contentType = "application/json"
+
+    request = bedrock_runtime.invoke_model(
+        body=body, modelId=modelId, accept=accept, contentType=contentType
+    )
+
+    # Extract text from request
+    response_body = json.loads(request.get("body").read())
+    text = response_body.get("content")[0].get("text")
+
+    response = ResponseObject(
+    text=text,
+    usage_metadata=request['ResponseMetadata']
+    )
+
+    # Now you can access both the text and metadata
+    #print("Text:", response.text)
+    print("Metadata:", response.usage_metadata)   
+    
+    return response
+
+def produce_streaming_answer_chatbot(history,
+            full_prompt,
+            model_type,
             temperature=temperature,
+            relevant_query_bool=True,
             max_new_tokens=max_new_tokens,
             sample=sample,
             repetition_penalty=repetition_penalty,
@@ -304,7 +395,16 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type,
 
     #    return history
 
-    if model_type == "Flan Alpaca (small, fast)": 
+    
+
+    if relevant_query_bool == False:
+        out_message = [("","No relevant query found. Please retry your question")]
+        history.append(out_message)
+
+        yield history
+        return
+
+    if model_type == "Qwen 2 0.5B (small, fast)": 
         # Get the model and tokenizer, and tokenize the user text.
         model_inputs = tokenizer(text=full_prompt, return_tensors="pt", return_attention_mask=False).to(torch_device)
         
@@ -322,7 +422,7 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type,
             top_k=top_k
         )
 
-        print(generate_kwargs)
+        #print(generate_kwargs)
 
         t = Thread(target=model.generate, kwargs=generate_kwargs)
         t.start()
@@ -350,7 +450,7 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type,
         print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
         print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
-    elif model_type == "Phi 3 Mini (larger, slow)":
+    elif model_type == "Phi 3.5 Mini (larger, slow)":
         #tokens = model.tokenize(full_prompt)
 
         gen_config = CtransGenGenerationConfig()
@@ -384,6 +484,33 @@ def produce_streaming_answer_chatbot(history, full_prompt, model_type,
         print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
         print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
+    elif model_type == "anthropic.claude-3-haiku-20240307-v1:0" or model_type == "anthropic.claude-3-sonnet-20240229-v1:0":
+        system_prompt = "You are answering questions from the user based on source material. Respond with short, factually correct answers."
+
+        try:
+            print("Calling AWS Claude model")
+            response = call_aws_claude(full_prompt, system_prompt, temperature, max_tokens, model_type)
+        except Exception as e:
+            # If fails, try again after 10 seconds in case there is a throttle limit
+            print(e)
+            try:
+                out_message = "API limit hit - waiting 30 seconds to retry."
+                print(out_message)
+
+                time.sleep(30)
+                response = call_aws_claude(full_prompt, system_prompt, temperature, max_tokens, model_type)
+            
+            except Exception as e:
+                print(e)
+                return "", history
+        # Update the conversation history with the new prompt and response
+        history.append({'role': 'user', 'parts': [full_prompt]})
+        history.append({'role': 'assistant', 'parts': [response.text]})
+        
+        # Print the updated conversation history
+        #print("conversation_history:", conversation_history)
+        
+        return response, history
 
 # Chat helper functions
 
@@ -507,7 +634,7 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
                 docs_content = doc_df['page_content'].astype(str)
                 docs_url = doc_df['meta_url']
 
-                return docs_keep_as_doc, docs_content, docs_url
+                return docs_keep_as_doc, doc_df, docs_content, docs_url
             
             # Check for if more docs are removed than the desired output
             if out_passages > docs_keep_length: 
@@ -519,47 +646,58 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
 
             print("Number of documents remaining: ", docs_keep_length)
             
-            # 2nd level check on retrieved docs with BM25
-
+            # 2nd level check using BM25s package to do keyword search on retrieved passages.
+            
             content_keep=[]
             for item in docs_keep:
                 content_keep.append(item[0].page_content)
 
-            corpus = corpus = [doc.lower().split() for doc in content_keep]
-            dictionary = Dictionary(corpus)
-            bm25_model = OkapiBM25Model(dictionary=dictionary)
-            bm25_corpus = bm25_model[list(map(dictionary.doc2bow, corpus))]
-            bm25_index = SparseMatrixSimilarity(bm25_corpus, num_docs=len(corpus), num_terms=len(dictionary),
-                                   normalize_queries=False, normalize_documents=False)
-            query = new_question_kworded.lower().split()
-            tfidf_model = TfidfModel(dictionary=dictionary, smartirs='bnn')  # Enforce binary weighting of queries
-            tfidf_query = tfidf_model[dictionary.doc2bow(query)]
-            similarities = np.array(bm25_index[tfidf_query])
-            #print(similarities)
-            temp = similarities.argsort()
-            ranks = np.arange(len(similarities))[temp.argsort()][::-1]
+            # Prepare Corpus (Tokenized & Optional Stemming)
+            corpus = [doc.lower() for doc in content_keep]
+            #stemmer = SnowballStemmer("english", ignore_stopwords=True)  # NLTK stemming not compatible
+            stemmer = Stemmer.Stemmer("english")
+            corpus_tokens = bm25s.tokenize(corpus, stopwords="en", stemmer=stemmer)
 
-            # Pair each index with its corresponding value
-            pairs = list(zip(ranks, docs_keep_as_doc))
-            # Sort the pairs by the indices
+            # Create and Index with BM25s
+            retriever = bm25s.BM25()
+            retriever.index(corpus_tokens)
+
+            # Query Processing (Stemming applied consistently if used above)
+            query_tokens = bm25s.tokenize(new_question_kworded.lower(), stemmer=stemmer)
+            results, scores = retriever.retrieve(query_tokens, corpus=corpus, k=len(corpus)) # Retrieve all docs
+
+            for i in range(results.shape[1]):
+                doc, score = results[0, i], scores[0, i]
+                print(f"Rank {i+1} (score: {score:.2f}): {doc}")
+
+            #print("BM25 results:", results)
+            #print("BM25 scores:", scores)
+
+            # Rank Calculation (Custom Logic for Your BM25 Score)
+            bm25_rank = list(range(1, len(results[0]) + 1))
+            #bm25_rank = results[0]#.tolist()[0]  # Since you have a single query
+            bm25_score = [(docs_keep_length / (rank + 1)) * bm25_weight for rank in bm25_rank] 
+            # +1 to avoid division by 0 for rank 0
+
+            # Result Ordering (Using the calculated ranks)
+            pairs = list(zip(bm25_rank, docs_keep_as_doc))
             pairs.sort()
-            # Extract the values in the new order
-            bm25_result = [value for ranks, value in pairs]
+            bm25_result = [value for rank, value in pairs]
             
-            bm25_rank=[]
-            bm25_score = []
-
-            for vec_item in docs_keep:
-                x = 0
-                for bm25_item in bm25_result:
-                    x = x + 1
-                    if bm25_item.page_content == vec_item[0].page_content:
-                        bm25_rank.append(x)
-                        bm25_score.append((docs_keep_length/x)*bm25_weight)
 
             # 3rd level check on retrieved docs with SVM retriever
+            # Check the type of the embeddings object
+            embeddings_type = type(embeddings)
+            print("Type of embeddings object:", embeddings_type)
 
-            svm_retriever = SVMRetriever.from_texts(content_keep, embeddings, k = k_val)
+
+            print("embeddings:", embeddings)
+
+            from langchain_huggingface import HuggingFaceEmbeddings
+            #hf_embeddings = HuggingFaceEmbeddings(**embeddings)
+            hf_embeddings = embeddings
+            
+            svm_retriever = SVMRetriever.from_texts(content_keep, hf_embeddings, k = k_val)
             svm_result = svm_retriever.invoke(new_question_kworded)
 
          
@@ -604,6 +742,10 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
                                
             # Make df of best options
             doc_df = create_doc_df(docs_keep_out)
+
+            print("doc_df:",doc_df)
+            print("docs_keep_as_doc:",docs_keep_as_doc)
+            print("docs_keep_out:", docs_keep_out)
 
             return docs_keep_as_doc, doc_df, docs_keep_out
 

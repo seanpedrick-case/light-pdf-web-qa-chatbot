@@ -1,9 +1,10 @@
 # Load in packages
 
 import os
+import socket
 
 from typing import Type
-from langchain_community.embeddings import HuggingFaceEmbeddings#, HuggingFaceInstructEmbeddings
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings#, HuggingFaceInstructEmbeddings
 from langchain_community.vectorstores import FAISS
 import gradio as gr
 import pandas as pd
@@ -12,9 +13,27 @@ from transformers import AutoTokenizer
 import torch
 
 from llama_cpp import Llama
-from huggingface_hub import hf_hub_download  
+from huggingface_hub import hf_hub_download
+from chatfuncs.ingest import embed_faiss_save_to_zip
+from chatfuncs.helper_functions import get_or_create_env_var
+
+from chatfuncs.helper_functions import ensure_output_folder_exists, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs
+from chatfuncs.aws_functions import upload_file_to_s3
+#from chatfuncs.llm_api_call import llm_query
+from chatfuncs.auth import authenticate_user
 
 PandasDataFrame = Type[pd.DataFrame]
+
+from datetime import datetime
+today_rev = datetime.now().strftime("%Y%m%d")
+
+ensure_output_folder_exists()
+
+host_name = socket.gethostname()
+
+access_logs_data_folder = 'logs/' + today_rev + '/' + host_name + '/'
+feedback_data_folder = 'feedback/' + today_rev + '/' + host_name + '/'
+usage_data_folder = 'usage/' + today_rev + '/' + host_name + '/'
 
 # Disable cuda devices if necessary
 #os.environ['CUDA_VISIBLE_DEVICES'] = '-1' 
@@ -22,7 +41,9 @@ PandasDataFrame = Type[pd.DataFrame]
 #from chatfuncs.chatfuncs import *
 import chatfuncs.ingest as ing
 
-##  Load preset embeddings, vectorstore, and model
+###
+# Load preset embeddings, vectorstore, and model
+###
 
 embeddings_name = "BAAI/bge-base-en-v1.5"
 
@@ -68,7 +89,7 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     if torch_device is None:
         torch_device = chatf.torch_device
 
-    if model_type == "Phi 3 Mini (larger, slow)":
+    if model_type == "Phi 3.5 Mini (larger, slow)":
         if torch_device == "cuda":
             gpu_config.update_gpu(gpu_layers)
             print("Loading with", gpu_config.n_gpu_layers, "model layers sent to GPU.")
@@ -84,8 +105,8 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
         try:
             model = Llama(
             model_path=hf_hub_download(
-            repo_id=os.environ.get("REPO_ID", "QuantFactory/Phi-3-mini-128k-instruct-GGUF"),# "QuantFactory/Phi-3-mini-128k-instruct-GGUF"), # "QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-v2"), #"microsoft/Phi-3-mini-4k-instruct-gguf"),#"TheBloke/Mistral-7B-OpenOrca-GGUF"),
-            filename=os.environ.get("MODEL_FILE", "Phi-3-mini-128k-instruct.Q4_K_M.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")  #"Meta-Llama-3-8B-Instruct-v2.Q6_K.gguf") #"Phi-3-mini-4k-instruct-q4.gguf")#"mistral-7b-openorca.Q4_K_M.gguf"),
+            repo_id=os.environ.get("REPO_ID", "QuantFactory/Phi-3.5-mini-instruct-GGUF"),# "QuantFactory/Phi-3-mini-128k-instruct-GGUF"), # "QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-v2"), #"microsoft/Phi-3-mini-4k-instruct-gguf"),#"TheBloke/Mistral-7B-OpenOrca-GGUF"),
+            filename=os.environ.get("MODEL_FILE", "Phi-3.5-mini-instruct.Q4_K_M.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")  #"Meta-Llama-3-8B-Instruct-v2.Q6_K.gguf") #"Phi-3-mini-4k-instruct-q4.gguf")#"mistral-7b-openorca.Q4_K_M.gguf"),
         ),
         **vars(gpu_config) # change n_gpu_layers if you have more or less VRAM 
         )
@@ -95,17 +116,17 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
             print(e)
             model = Llama(
             model_path=hf_hub_download(
-            repo_id=os.environ.get("REPO_ID", "QuantFactory/Phi-3-mini-128k-instruct-GGUF"), #"QuantFactory/Phi-3-mini-128k-instruct-GGUF"), #, "microsoft/Phi-3-mini-4k-instruct-gguf"),#"QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-v2"), #"microsoft/Phi-3-mini-4k-instruct-gguf"),#"TheBloke/Mistral-7B-OpenOrca-GGUF"),
-            filename=os.environ.get("MODEL_FILE", "Phi-3-mini-128k-instruct.Q4_K_M.gguf"), # "Phi-3-mini-128k-instruct.Q4_K_M.gguf") # , #"Meta-Llama-3-8B-Instruct-v2.Q6_K.gguf") #"Phi-3-mini-4k-instruct-q4.gguf"),#"mistral-7b-openorca.Q4_K_M.gguf"),
+            repo_id=os.environ.get("REPO_ID", "QuantFactory/Phi-3.5-mini-instruct-GGUF"), #"QuantFactory/Phi-3-mini-128k-instruct-GGUF"), #, "microsoft/Phi-3-mini-4k-instruct-gguf"),#"QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-v2"), #"microsoft/Phi-3-mini-4k-instruct-gguf"),#"TheBloke/Mistral-7B-OpenOrca-GGUF"),
+            filename=os.environ.get("MODEL_FILE", "Phi-3.5-mini-instruct.Q4_K_M.gguf"), # "Phi-3-mini-128k-instruct.Q4_K_M.gguf") # , #"Meta-Llama-3-8B-Instruct-v2.Q6_K.gguf") #"Phi-3-mini-4k-instruct-q4.gguf"),#"mistral-7b-openorca.Q4_K_M.gguf"),
         ),
         **vars(cpu_config)
         )
 
         tokenizer = []
 
-    if model_type == "Flan Alpaca (small, fast)":
+    if model_type == "Qwen 2 0.5B (small, fast)":
         # Huggingface chat model
-        hf_checkpoint = 'declare-lab/flan-alpaca-large'#'declare-lab/flan-alpaca-base' # # #
+        hf_checkpoint = 'Qwen/Qwen2-0.5B-Instruct'# 'declare-lab/flan-alpaca-large'#'declare-lab/flan-alpaca-base' # # # 'Qwen/Qwen1.5-0.5B-Chat' #
         
         def create_hf_model(model_name):
 
@@ -113,14 +134,14 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
             
             if torch_device == "cuda":
                 if "flan" in model_name:
-                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto", torch_dtype=torch.float16)
+                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")#, torch_dtype=torch.float16)
                 else:
-                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", torch_dtype=torch.float16)
+                    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")#, torch_dtype=torch.float16)
             else:
                 if "flan" in model_name:
-                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.float16)
+                    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)#, torch_dtype=torch.float16)
                 else: 
-                    model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, torch_dtype=torch.float16)
+                    model = AutoModelForCausalLM.from_pretrained(model_name)#, trust_remote_code=True)#, torch_dtype=torch.float16)
 
             tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = chatf.context_length)
 
@@ -138,10 +159,10 @@ def load_model(model_type, gpu_layers, gpu_config=None, cpu_config=None, torch_d
     return model_type, load_confirmation, model_type
 
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
-model_type = "Phi 3 Mini (larger, slow)"
-load_model(model_type, chatf.gpu_layers, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
+#model_type = "Phi 3.5 Mini (larger, slow)"
+#load_model(model_type, chatf.gpu_layers, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
-model_type = "Flan Alpaca (small, fast)"
+model_type = "Qwen 2 0.5B (small, fast)"
 load_model(model_type, 0, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
 def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
@@ -152,25 +173,30 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 
     vectorstore_func = FAISS.from_documents(documents=docs_out, embedding=embeddings)
 
-
     chatf.vectorstore = vectorstore_func
 
     out_message = "Document processing complete"
 
     return out_message, vectorstore_func
-
  # Gradio chat
 
-block = gr.Blocks(theme = gr.themes.Base())#css=".gradio-container {background-color: black}")
 
-with block:
+###
+# RUN UI
+###
+
+app = gr.Blocks(theme = gr.themes.Base())#css=".gradio-container {background-color: black}")
+
+with app:
     ingest_text = gr.State()
     ingest_metadata = gr.State()
     ingest_docs = gr.State()
 
     model_type_state = gr.State(model_type)
     embeddings_state = gr.State(chatf.embeddings)#globals()["embeddings"])
-    vectorstore_state = gr.State(chatf.vectorstore)#globals()["vectorstore"])  
+    vectorstore_state = gr.State(chatf.vectorstore)#globals()["vectorstore"]) 
+
+    relevant_query_state = gr.Checkbox(value=True, visible=False) 
 
     model_state = gr.State() # chatf.model (gives error)
     tokenizer_state = gr.State() # chatf.tokenizer (gives error)
@@ -178,9 +204,26 @@ with block:
     chat_history_state = gr.State()
     instruction_prompt_out = gr.State()
 
+    session_hash_state = gr.State()
+    s3_output_folder_state = gr.State()
+
+    session_hash_textbox = gr.Textbox(value="", visible=False)
+    s3_logs_output_textbox = gr.Textbox(label="S3 logs", visible=False)
+
+    access_logs_state = gr.State(access_logs_data_folder + 'dataset1.csv')
+    access_s3_logs_loc_state = gr.State(access_logs_data_folder)
+    usage_logs_state = gr.State(usage_data_folder + 'dataset1.csv')
+    usage_s3_logs_loc_state = gr.State(usage_data_folder)
+    feedback_logs_state = gr.State(feedback_data_folder + 'dataset1.csv')
+    feedback_s3_logs_loc_state = gr.State(feedback_data_folder)
+
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown("Chat with PDF, web page or (new) csv/Excel documents. The default is a small model (Flan Alpaca), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Phi 3 Mini (larger, slow)), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+    gr.Markdown("Chat with PDF, web page or (new) csv/Excel documents. The default is a small model (Qwen 2 0.5B), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative (Phi 3.5 Mini (larger, slow)), can reason a little better, but is much slower (See Advanced tab).\n\nBy default the Lambeth Borough Plan '[Lambeth 2030 : Our Future, Our Lambeth](https://www.lambeth.gov.uk/better-fairer-lambeth/projects/lambeth-2030-our-future-our-lambeth)' is loaded. If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.")
+
+    with gr.Accordion(label="Use Gemini or AWS Claude model", open=False, visible=False):
+        api_model_choice = gr.Dropdown(value = "None", choices = ["gemini-1.5-flash-002", "gemini-1.5-pro-002", "anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0", "None"], label="LLM model to use", multiselect=False, interactive=True, visible=False)
+        in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password",interactive=True, visible=False)
 
     with gr.Row():
         current_source = gr.Textbox(label="Current data source(s)", value="Lambeth_2030-Our_Future_Our_Lambeth.pdf", scale = 10)
@@ -190,7 +233,7 @@ with block:
 
         with gr.Row():
             #chat_height = 500
-            chatbot = gr.Chatbot(avatar_images=('user.jfif', 'bot.jpg'),bubble_full_width = False, scale = 1) # , height=chat_height
+            chatbot = gr.Chatbot(avatar_images=('user.jfif', 'bot.jpg'),bubble_full_width = False, scale = 1, type='tuples') # , height=chat_height
             with gr.Accordion("Open this tab to see the source paragraphs used to generate the answer", open = False):
                 sources = gr.HTML(value = "Source paragraphs with the most relevant text will appear here") # , height=chat_height
 
@@ -210,7 +253,6 @@ with block:
                 "What is the vision statement for Lambeth?",
                 "What are the commitments for Lambeth?",
                 "What are the 2030 outcomes for Lambeth?"])
-
         
         current_topic = gr.Textbox(label="Feature currently disabled - Keywords related to current conversation topic.", placeholder="Keywords related to the conversation topic will appear here")      
 
@@ -230,14 +272,16 @@ with block:
             in_csv = gr.File(label="Upload CSV/Excel file", file_count="multiple", file_types=['.csv', '.xlsx'])
             in_text_column = gr.Textbox(label="Enter column name where text is stored")
             load_csv = gr.Button(value="Load in CSV/Excel file", variant="secondary", scale=0)
-        
-        ingest_embed_out = gr.Textbox(label="File/web page preparation progress")
+
+        with gr.Row():
+            ingest_embed_out = gr.Textbox(label="File/web page preparation progress")
+            file_out_box = gr.File(file_count='single', file_types=['.zip'])
 
     with gr.Tab("Advanced features"):
         out_passages = gr.Slider(minimum=1, value = 2, maximum=10, step=1, label="Choose number of passages to retrieve from the document. Numbers greater than 2 may lead to increased hallucinations or input text being truncated.")
         temp_slide = gr.Slider(minimum=0.1, value = 0.5, maximum=1, step=0.1, label="Choose temperature setting for response generation.")
         with gr.Row():
-            model_choice = gr.Radio(label="Choose a chat model", value="Flan Alpaca (small, fast)", choices = ["Flan Alpaca (small, fast)", "Phi 3 Mini (larger, slow)"])
+            model_choice = gr.Radio(label="Choose a chat model", value="Qwen 2 0.5B (small, fast)", choices = ["Qwen 2 0.5B (small, fast)", "Phi 3.5 Mini (larger, slow)"])
             change_model_button = gr.Button(value="Load model", scale=0)
         with gr.Accordion("Choose number of model layers to send to GPU (WARNING: please don't modify unless you are sure you have a GPU).", open = False):
             gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU.", value=0, minimum=0, maximum=100, step = 1, visible=True)
@@ -246,7 +290,7 @@ with block:
         
 
     gr.HTML(
-        "<center>This app is based on the models Flan Alpaca and Phi 3 Mini. It powered by Gradio, Transformers, and Llama.cpp.</a></center>"
+        "<center>This app is based on the models Qwen 2 0.5B and Phi 3.5 Mini. It powered by Gradio, Transformers, and Llama.cpp.</a></center>"
     )
 
     examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
@@ -260,34 +304,34 @@ with block:
     # Load in a pdf
     load_pdf_click = load_pdf.click(ing.parse_file, inputs=[in_pdf], outputs=[ingest_text, current_source]).\
              then(ing.text_to_docs, inputs=[ingest_text], outputs=[ingest_docs]).\
-             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state]).\
+             then(embed_faiss_save_to_zip, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state, file_out_box]).\
              then(chatf.hide_block, outputs = [examples_set])
 
     # Load in a webpage
     load_web_click = load_web.click(ing.parse_html, inputs=[in_web, in_div], outputs=[ingest_text, ingest_metadata, current_source]).\
              then(ing.html_text_to_docs, inputs=[ingest_text, ingest_metadata], outputs=[ingest_docs]).\
-             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state]).\
+             then(embed_faiss_save_to_zip, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state, file_out_box]).\
              then(chatf.hide_block, outputs = [examples_set])
     
     # Load in a csv/excel file
     load_csv_click = load_csv.click(ing.parse_csv_or_excel, inputs=[in_csv, in_text_column], outputs=[ingest_text, current_source]).\
              then(ing.csv_excel_text_to_docs, inputs=[ingest_text, in_text_column], outputs=[ingest_docs]).\
-             then(docs_to_faiss_save, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state]).\
+             then(embed_faiss_save_to_zip, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state, file_out_box]).\
              then(chatf.hide_block, outputs = [examples_set])
 
     # Load in a webpage
 
     # Click/enter to send message action
-    response_click = submit.click(chatf.create_full_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state, model_type_state, out_passages], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False, api_name="retrieval").\
+    response_click = submit.click(chatf.create_full_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state, model_type_state, out_passages, api_model_choice, in_api_key], outputs=[chat_history_state, sources, instruction_prompt_out, relevant_query_state], queue=False, api_name="retrieval").\
                 then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
-                then(chatf.produce_streaming_answer_chatbot, inputs=[chatbot, instruction_prompt_out, model_type_state, temp_slide], outputs=chatbot)
+                then(chatf.produce_streaming_answer_chatbot, inputs=[chatbot, instruction_prompt_out, model_type_state, temp_slide, relevant_query_state], outputs=chatbot)
     response_click.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\
                 then(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
                 then(lambda: chatf.restore_interactivity(), None, [message], queue=False)
 
-    response_enter = message.submit(chatf.create_full_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state, model_type_state, out_passages], outputs=[chat_history_state, sources, instruction_prompt_out], queue=False).\
+    response_enter = message.submit(chatf.create_full_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state, model_type_state, out_passages, api_model_choice, in_api_key], outputs=[chat_history_state, sources, instruction_prompt_out, relevant_query_state], queue=False).\
                 then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
-                then(chatf.produce_streaming_answer_chatbot, [chatbot, instruction_prompt_out, model_type_state, temp_slide], chatbot)    
+                then(chatf.produce_streaming_answer_chatbot, [chatbot, instruction_prompt_out, model_type_state, temp_slide, relevant_query_state], chatbot)    
     response_enter.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\
                 then(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
                 then(lambda: chatf.restore_interactivity(), None, [message], queue=False)
@@ -302,4 +346,24 @@ with block:
     # Thumbs up or thumbs down voting function
     chatbot.like(chatf.vote, [chat_history_state, instruction_prompt_out, model_type_state], None)
 
-block.queue().launch(debug=True)
+    ###
+    # LOGGING AND ON APP LOAD FUNCTIONS
+    ###    
+    app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
+
+    # Log usernames and times of access to file (to know who is using the app when running on AWS)
+    access_callback = gr.CSVLogger()
+    access_callback.setup([session_hash_textbox], access_logs_data_folder)
+
+    session_hash_textbox.change(lambda *args: access_callback.flag(list(args)), [session_hash_textbox], None, preprocess=False).\
+    then(fn = upload_file_to_s3, inputs=[access_logs_state, access_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+
+# Launch the Gradio app
+COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
+print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
+
+if __name__ == "__main__":
+    if os.environ['COGNITO_AUTH'] == "1":
+        app.queue().launch(show_error=True, auth=authenticate_user, max_file_size='50mb')
+    else:
+        app.queue().launch(show_error=True, inbrowser=True, max_file_size='50mb')

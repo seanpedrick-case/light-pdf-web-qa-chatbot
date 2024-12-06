@@ -65,3 +65,12 @@ Answer the QUESTION using information from the following CONTENT. Respond with s
 CONTENT: {summaries}\n
 QUESTION: {question}\n
 Answer:<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"""
+
+instruction_prompt_qwen = """<|im_start|>system\n
+You are an AI assistant that follows instruction extremely well. Help as much as you can.
+<|im_start|>user\n
+Answer the QUESTION using information from the following CONTENT. Respond with short answers that directly answer the question.
+CONTENT: {summaries}
+QUESTION: {question}\n
+Answer:<|im_end|>
+<|im_start|>assistant\n"""
