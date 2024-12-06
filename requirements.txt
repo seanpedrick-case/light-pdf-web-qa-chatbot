@@ -20,3 +20,4 @@ bm25s
 PyStemmer
 scipy<1.13
 numpy==1.26.4
+boto3
