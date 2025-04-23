@@ -1,0 +1,23 @@
+langchain==0.3.24
+langchain-community==0.3.22
+langchain-huggingface==0.1.2
+beautifulsoup4==4.13.4
+google-generativeai==0.8.5
+pandas==2.2.3
+transformers==4.51.3
+torch==2.5.1 --extra-index-url https://download.pytorch.org/whl/cu121
+llama-cpp-python==0.3.2 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+#llama-cpp-python==0.3.8 -C cmake.args="-DGGML_CUDA=on"
+sentence_transformers==4.1.0
+faiss-cpu==1.10.0
+pypdf==5.4.0
+python-docx==1.1.2
+keybert==0.9.0
+span-marker==1.7.0
+gradio==5.25.2
+nltk==3.9.1
+bm25s==0.2.12
+PyStemmer==2.2.0.3
+scipy==1.15.2
+numpy==1.26.4
+boto3==1.38.0

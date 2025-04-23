@@ -1,10 +1,10 @@
 ---
 title: Light PDF web QA chatbot
 emoji: 🌍
-colorFrom: yellow
+colorFrom: blue
 colorTo: yellow
 sdk: gradio
-sdk_version: 5.8.0
+sdk_version: 5.25.2
 app_file: app.py
 pinned: false
 license: apache-2.0
