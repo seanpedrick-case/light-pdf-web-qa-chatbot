@@ -6,11 +6,16 @@ import time
 from itertools import compress
 import pandas as pd
 import numpy as np
+import google.generativeai as ai
+from gradio import Progress
+import boto3
+import json
 
 # Model packages
 import torch.cuda
 from threading import Thread
 from transformers import pipeline, TextIteratorStreamer
+from langchain_huggingface import HuggingFaceEmbeddings
 
 # Alternative model sources
 #from dataclasses import asdict, dataclass
@@ -22,31 +27,37 @@ from langchain_community.retrievers import SVMRetriever
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 
+from chatfuncs.config import GEMINI_API_KEY, AWS_DEFAULT_REGION
+
+model_object = [] # Define empty list for model functions to run
+tokenizer = [] # Define empty list for model functions to run
+
+from chatfuncs.model_load import temperature, max_new_tokens, sample, repetition_penalty, top_p, top_k, torch_device, CtransGenGenerationConfig, max_tokens
+
+# ResponseObject class for AWS Bedrock calls
+class ResponseObject:
+    def __init__(self, text, usage_metadata):
+        self.text = text
+        self.usage_metadata = usage_metadata
+
+bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_DEFAULT_REGION)
+
 # For keyword extraction (not currently used)
 #import nltk
 #nltk.download('wordnet')
 from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
-#from nltk.stem.snowball import SnowballStemmer
 from keybert import KeyBERT
 
 # For Name Entity Recognition model
 #from span_marker import SpanMarkerModel # Not currently used
 
-
 # For BM25 retrieval
 import bm25s
 import Stemmer
 
-#from gensim.corpora import Dictionary
-#from gensim.models import TfidfModel, OkapiBM25Model
-#from gensim.similarities import SparseMatrixSimilarity
-
-from llama_cpp import Llama
-from huggingface_hub import hf_hub_download
-
-from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen
+from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen, instruction_prompt_template_orca
 
 import gradio as gr
 
@@ -60,10 +71,8 @@ model_type = None # global variable setup
 
 max_memory_length = 0 # How long should the memory of the conversation last?
 
-full_text = "" # Define dummy source text (full text) just to enable highlight function to load
+source_texts = "" # Define dummy source text (full text) just to enable highlight function to load
 
-model = [] # Define empty list for model functions to run
-tokenizer = [] # Define empty list for model functions to run
 
 ## Highlight text constants
 hlt_chunk_size = 12
@@ -76,84 +85,6 @@ ner_model = []#SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base
 ## Initialise keyword model ##
 # Used to pull out keywords from chat history to add to user queries behind the scenes
 kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniLM-L6-v2")
-
-# Currently set gpu_layers to 0 even with cuda due to persistent bugs in implementation with cuda
-if torch.cuda.is_available():
-    torch_device = "cuda"
-    gpu_layers = 100
-else: 
-    torch_device =  "cpu"
-    gpu_layers = 0
-
-print("Running on device:", torch_device)
-threads = 8 #torch.get_num_threads()
-print("CPU threads:", threads)
-
-# Qwen 2 0.5B (small, fast) Model parameters
-temperature: float = 0.1
-top_k: int = 3
-top_p: float = 1
-repetition_penalty: float = 1.15
-flan_alpaca_repetition_penalty: float = 1.3
-last_n_tokens: int = 64
-max_new_tokens: int = 1024
-seed: int = 42
-reset: bool = False
-stream: bool = True
-threads: int = threads
-batch_size:int = 256
-context_length:int = 2048
-sample = True
-
-
-class CtransInitConfig_gpu:
-    def __init__(self,
-                 last_n_tokens=last_n_tokens,
-                 seed=seed,
-                 n_threads=threads,
-                 n_batch=batch_size,
-                 n_ctx=4096,
-                 n_gpu_layers=gpu_layers):
-
-        self.last_n_tokens = last_n_tokens
-        self.seed = seed
-        self.n_threads = n_threads
-        self.n_batch = n_batch
-        self.n_ctx = n_ctx
-        self.n_gpu_layers = n_gpu_layers
-        # self.stop: list[str] = field(default_factory=lambda: [stop_string])
-
-    def update_gpu(self, new_value):
-        self.n_gpu_layers = new_value
-
-class CtransInitConfig_cpu(CtransInitConfig_gpu):
-    def __init__(self):
-        super().__init__()
-        self.n_gpu_layers = 0
-
-gpu_config = CtransInitConfig_gpu()
-cpu_config = CtransInitConfig_cpu()
-
-
-class CtransGenGenerationConfig:
-    def __init__(self, temperature=temperature,
-                 top_k=top_k,
-                 top_p=top_p,
-                 repeat_penalty=repetition_penalty,
-                 seed=seed,
-                 stream=stream,
-                 max_tokens=max_new_tokens
-                 ):
-        self.temperature = temperature
-        self.top_k = top_k
-        self.top_p = top_p
-        self.repeat_penalty = repeat_penalty
-        self.seed = seed
-        self.max_tokens=max_tokens
-        self.stream = stream
-
-    def update_temp(self, new_value):
-        self.temperature = new_value
 
 # Vectorstore funcs
 
@@ -187,7 +118,7 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 
 # Prompt functions
 
-def base_prompt_templates(model_type = "Qwen 2 0.5B (small, fast)"):    
+def base_prompt_templates(model_type:str = "Qwen 2 0.5B (small, fast)"):    
   
     #EXAMPLE_PROMPT = PromptTemplate(
     #    template="\nCONTENT:\n\n{page_content}\n\nSOURCE: {source}\n\n",
@@ -205,20 +136,20 @@ def base_prompt_templates(model_type = "Qwen 2 0.5B (small, fast)"):
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_qwen, input_variables=['question', 'summaries'])
     elif model_type == "Phi 3.5 Mini (larger, slow)":
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_phi3, input_variables=['question', 'summaries'])
+    else:
+        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_orca, input_variables=['question', 'summaries'])
+        
 
     return INSTRUCTION_PROMPT, CONTENT_PROMPT
 
-def write_out_metadata_as_string(metadata_in):
+def write_out_metadata_as_string(metadata_in:str):
     metadata_string = [f"{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}" for d in metadata_in] # ['metadata']
     return metadata_string
 
-def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings, relevant_flag = True, out_passages = 2): # , 
+def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt:str, content_prompt:str, extracted_memory:list, vectorstore:object, embeddings:object, relevant_flag:bool = True, out_passages:int = 2): # , 
         
     question =  inputs["question"]
     chat_history = inputs["chat_history"]
-
-    print("relevant_flag in generate_expanded_prompt:", relevant_flag)
-    
     
     if relevant_flag == True:
         new_question_kworded = adapt_q_from_chat_history(question, chat_history, extracted_memory) # new_question_keywords, 
@@ -234,8 +165,6 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
         return sorry_prompt, "No relevant sources found.", new_question_kworded
     
     # Expand the found passages to the neighbouring context
-    print("Doc_df columns:", doc_df.columns)
-
     if 'meta_url' in doc_df.columns:
         file_type = determine_file_type(doc_df['meta_url'][0])
     else:
@@ -265,14 +194,22 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt, content
             
     return instruction_prompt_out, sources_docs_content_string, new_question_kworded
 
-def create_full_prompt(user_input, history, extracted_memory, vectorstore, embeddings, model_type, out_passages, api_model_choice=None, api_key=None, relevant_flag = True):
+def create_full_prompt(user_input:str,
+                       history:list[dict],
+                       extracted_memory:str,
+                       vectorstore:object,
+                       embeddings:object,
+                       model_type:str,
+                       out_passages:list[str],
+                       api_model_choice=None,
+                       api_key=None,
+                       relevant_flag = True):
     
     #if chain_agent is None:
     #    history.append((user_input, "Please click the button to submit the Huggingface API key before using the chatbot (top right)"))
     #    return history, history, "", ""
     print("\n==== date/time: " + str(datetime.datetime.now()) + " ====")
-    
-    
+        
     history = history or []
 
     if api_model_choice and api_model_choice != "None":
@@ -298,30 +235,12 @@ def create_full_prompt(user_input, history, extracted_memory, vectorstore, embed
                 generate_expanded_prompt({"question": user_input, "chat_history": history}, #vectorstore,
                                     instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings, relevant_flag, out_passages)
   
-    history.append(user_input)
+    history.append({"metadata":None, "options":None, "role": 'user', "content": user_input})
     
     print("Output history is:", history)
     print("Final prompt to model is:",instruction_prompt_out)
         
     return history, docs_content_string, instruction_prompt_out, relevant_flag
-
-# Chat functions
-import boto3
-import json
-from chatfuncs.helper_functions import get_or_create_env_var
-
-# ResponseObject class for AWS Bedrock calls
-class ResponseObject:
-        def __init__(self, text, usage_metadata):
-            self.text = text
-            self.usage_metadata = usage_metadata
-
-max_tokens = 4096
-
-AWS_DEFAULT_REGION = get_or_create_env_var('AWS_DEFAULT_REGION', 'eu-west-2')
-print(f'The value of AWS_DEFAULT_REGION is {AWS_DEFAULT_REGION}')
-
-bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_DEFAULT_REGION)
 
 def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice: str) -> ResponseObject:
     """
@@ -351,6 +270,8 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
         ],
     }
 
+    print("prompt_config:", prompt_config)
+
     body = json.dumps(prompt_config)
 
     modelId = model_choice
@@ -376,16 +297,173 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     
     return response
 
-def produce_streaming_answer_chatbot(history,
-            full_prompt,
-            model_type,
-            temperature=temperature,
-            relevant_query_bool=True,
-            max_new_tokens=max_new_tokens,
-            sample=sample,
-            repetition_penalty=repetition_penalty,
-            top_p=top_p,
-            top_k=top_k
+def construct_gemini_generative_model(in_api_key: str, temperature: float, model_choice: str, system_prompt: str, max_tokens: int) -> Tuple[object, dict]:
+    """
+    Constructs a GenerativeModel for Gemini API calls.
+
+    Parameters:
+    - in_api_key (str): The API key for authentication.
+    - temperature (float): The temperature parameter for the model, controlling the randomness of the output.
+    - model_choice (str): The choice of model to use for generation.
+    - system_prompt (str): The system prompt to guide the generation.
+    - max_tokens (int): The maximum number of tokens to generate.
+
+    Returns:
+    - Tuple[object, dict]: A tuple containing the constructed GenerativeModel and its configuration.
+    """
+    # Construct a GenerativeModel
+    try:
+        if in_api_key:
+            #print("Getting API key from textbox")
+            api_key = in_api_key
+            ai.configure(api_key=api_key)
+        elif "GOOGLE_API_KEY" in os.environ:
+            #print("Searching for API key in environmental variables")
+            api_key = os.environ["GOOGLE_API_KEY"]
+            ai.configure(api_key=api_key)
+        else:
+            print("No API key foound")
+            raise gr.Error("No API key found.")
+    except Exception as e:
+        print(e)
+    
+    config = ai.GenerationConfig(temperature=temperature, max_output_tokens=max_tokens)
+
+    print("model_choice:", model_choice)
+
+    #model = ai.GenerativeModel.from_cached_content(cached_content=cache, generation_config=config)
+    model = ai.GenerativeModel(model_name=model_choice, system_instruction=system_prompt, generation_config=config)
+    
+    return model, config
+
+# Function to send a request and update history
+def send_request(prompt: str, conversation_history: List[dict], model: object, config: dict, model_choice: str, system_prompt: str, temperature: float, progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+    """
+    This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
+    It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
+    If the model choice is specific to AWS Claude, it calls the `call_aws_claude` function; otherwise, it uses the `model.generate_content` method.
+    The function returns the response text and the updated conversation history.
+    """
+    # Constructing the full prompt from the conversation history
+    full_prompt = "Conversation history:\n"
+    
+    for entry in conversation_history:
+        role = entry['role'].capitalize()  # Assuming the history is stored with 'role' and 'content'
+        message = ' '.join(entry['parts'])  # Combining all parts of the message
+        full_prompt += f"{role}: {message}\n"
+    
+    # Adding the new user prompt
+    full_prompt += f"\nUser: {prompt}"
+
+    # Print the full prompt for debugging purposes
+    #print("full_prompt:", full_prompt)
+
+    # Generate the model's response
+    if "gemini" in model_choice:
+        try:
+            response = model.generate_content(contents=full_prompt, generation_config=config)
+        except Exception as e:
+            # If fails, try again after 10 seconds in case there is a throttle limit
+            print(e)
+            try:
+                print("Calling Gemini model")
+                out_message = "API limit hit - waiting 30 seconds to retry."
+                print(out_message)
+                progress(0.5, desc=out_message)
+                time.sleep(30)
+                response = model.generate_content(contents=full_prompt, generation_config=config)
+            except Exception as e:
+                print(e)
+                return "", conversation_history
+    elif "claude" in model_choice:
+        try:
+            print("Calling AWS Claude model")
+            print("prompt:", prompt)
+            print("system_prompt:", system_prompt)
+            response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
+        except Exception as e:
+            # If fails, try again after x seconds in case there is a throttle limit
+            print(e)
+            try:
+                out_message = "API limit hit - waiting 30 seconds to retry."
+                print(out_message)
+                progress(0.5, desc=out_message)
+                time.sleep(30)
+                response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
+            
+            except Exception as e:
+                print(e)
+                return "", conversation_history
+    else:
+        raise Exception("Model not found")
+
+    # Update the conversation history with the new prompt and response
+    conversation_history.append({"metadata":None, "options":None, "role": 'user', 'parts': [prompt]})
+    conversation_history.append({"metadata":None, "options":None, "role": "assistant", 'parts': [response.text]})
+    
+    # Print the updated conversation history
+    #print("conversation_history:", conversation_history)
+    
+    return response, conversation_history
+
+def process_requests(prompts: List[str], system_prompt_with_table: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], model: object, config: dict, model_choice: str, temperature: float, batch_no:int = 1, master:bool = False) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+    """
+    Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
+
+    Args:
+        prompts (List[str]): A list of prompts to be processed.
+        system_prompt_with_table (str): The system prompt including a table.
+        conversation_history (List[dict]): The history of the conversation.
+        whole_conversation (List[str]): The complete conversation including prompts and responses.
+        whole_conversation_metadata (List[str]): Metadata about the whole conversation.
+        model (object): The model to use for processing the prompts.
+        config (dict): Configuration for the model.
+        model_choice (str): The choice of model to use.        
+        temperature (float): The temperature parameter for the model.
+        batch_no (int): Batch number of the large language model request.
+        master (bool): Is this request for the master table.
+
+    Returns:
+        Tuple[List[ResponseObject], List[dict], List[str], List[str]]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, and the updated whole conversation metadata.
+    """
+    responses = []
+    #for prompt in prompts:
+
+    response, conversation_history = send_request(prompts[0], conversation_history, model=model, config=config, model_choice=model_choice, system_prompt=system_prompt_with_table, temperature=temperature)
+    
+    print(response.text)
+    #"Okay, I'm ready. What source are we discussing, and what's your question about it? Please provide as much context as possible so I can give you the best answer."]
+    print(response.usage_metadata)
+    responses.append(response)
+
+    # Create conversation txt object
+    whole_conversation.append(prompts[0])
+    whole_conversation.append(response.text)
+
+    # Create conversation metadata
+    if master == False:
+        whole_conversation_metadata.append(f"Query batch {batch_no} prompt {len(responses)} metadata:")
+    else:
+        whole_conversation_metadata.append(f"Query summary metadata:")
+
+    whole_conversation_metadata.append(str(response.usage_metadata))
+
+    return responses, conversation_history, whole_conversation, whole_conversation_metadata
+
+def produce_streaming_answer_chatbot(
+            history:list,
+            full_prompt:str,
+            model_type:str,
+            temperature:float=temperature,
+            relevant_query_bool:bool=True,
+            chat_history:list[dict]=[{"metadata":None, "options":None, "role": 'user', "content": ""}],
+            max_new_tokens:int=max_new_tokens,
+            sample:bool=sample,
+            repetition_penalty:float=repetition_penalty,
+            top_p:float=top_p,
+            top_k:float=top_k,
+            max_tokens:int=max_tokens,
+            in_api_key:str=GEMINI_API_KEY
 ):
     #print("Model type is: ", model_type)
 
@@ -395,16 +473,19 @@ def produce_streaming_answer_chatbot(history,
 
     #    return history
 
-    
+    history = chat_history
+
+    print("history at start of streaming function:", history)
 
     if relevant_query_bool == False:
-        out_message = [("","No relevant query found. Please retry your question")]
-        history.append(out_message)
+        history.append({"metadata":None, "options":None, "role": "assistant", "content": 'No relevant query found. Please retry your question'})
 
         yield history
         return
 
     if model_type == "Qwen 2 0.5B (small, fast)": 
+
+        print("tokenizer:", tokenizer)
         # Get the model and tokenizer, and tokenize the user text.
         model_inputs = tokenizer(text=full_prompt, return_tensors="pt", return_attention_mask=False).to(torch_device)
         
@@ -422,9 +503,9 @@ def produce_streaming_answer_chatbot(history,
             top_k=top_k
         )
 
-        #print(generate_kwargs)
+        print("model_object:", model_object)
 
-        t = Thread(target=model.generate, kwargs=generate_kwargs)
+        t = Thread(target=model_object.generate, kwargs=generate_kwargs)
         t.start()
 
         # Pull the generated text from the streamer, and update the model output.
@@ -432,12 +513,14 @@ def produce_streaming_answer_chatbot(history,
         NUM_TOKENS=0
         print('-'*4+'Start Generation'+'-'*4)
 
-        history[-1][1] = ""
+        history.append({"metadata":None, "options":None, "role": "assistant", "content": ""})
+
         for new_text in streamer:
             try:
-                if new_text == None: new_text = ""
-                history[-1][1] += new_text
-                NUM_TOKENS+=1
+                if new_text is None:
+                    new_text = ""
+                history[-1]['content'] += new_text
+                NUM_TOKENS += 1
                 yield history
             except Exception as e:
                 print(f"Error during text generation: {e}")
@@ -463,14 +546,15 @@ def produce_streaming_answer_chatbot(history,
         NUM_TOKENS=0
         print('-'*4+'Start Generation'+'-'*4)
 
-        output = model(
+        output = model_object(
         full_prompt, **vars(gen_config))
 
-        history[-1][1] = ""
+        history.append({"metadata":None, "options":None, "role": "assistant", "content": ""})
+
         for out in output:
 
             if "choices" in out and len(out["choices"]) > 0 and "text" in out["choices"][0]:
-                history[-1][1] += out["choices"][0]["text"]
+                history[-1]['content'] += out["choices"][0]["text"]
                 NUM_TOKENS+=1
                 yield history
             else:
@@ -481,36 +565,75 @@ def produce_streaming_answer_chatbot(history,
         print('-'*4+'End Generation'+'-'*4)
         print(f'Num of generated tokens: {NUM_TOKENS}')
         print(f'Time for complete generation: {time_generate}s')
-        print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
+        print(f'Tokens per second: {NUM_TOKENS/time_generate}')
         print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
-    elif model_type == "anthropic.claude-3-haiku-20240307-v1:0" or model_type == "anthropic.claude-3-sonnet-20240229-v1:0":
+    elif "claude" in model_type:
         system_prompt = "You are answering questions from the user based on source material. Respond with short, factually correct answers."
 
-        try:
-            print("Calling AWS Claude model")
-            response = call_aws_claude(full_prompt, system_prompt, temperature, max_tokens, model_type)
-        except Exception as e:
-            # If fails, try again after 10 seconds in case there is a throttle limit
-            print(e)
-            try:
-                out_message = "API limit hit - waiting 30 seconds to retry."
-                print(out_message)
+        print("full_prompt:", full_prompt)
 
-                time.sleep(30)
-                response = call_aws_claude(full_prompt, system_prompt, temperature, max_tokens, model_type)
-            
-            except Exception as e:
-                print(e)
-                return "", history
+        if isinstance(full_prompt, str):
+            full_prompt = [full_prompt]
+
+        model = model_type
+        config = {}
+
+        responses, summary_conversation_history, whole_summary_conversation, whole_conversation_metadata = process_requests(full_prompt, system_prompt, conversation_history=[], whole_conversation=[], whole_conversation_metadata=[], model=model, config = config, model_choice = model_type, temperature = temperature)
+        
+        if isinstance(responses[-1], ResponseObject):
+            response_texts = [resp.text for resp in responses]
+        elif "choices" in responses[-1]:
+            response_texts = [resp["choices"][0]['text'] for resp in responses]
+        else:
+            response_texts = [resp.text for resp in responses]
+
+        latest_response_text = response_texts[-1]
+
         # Update the conversation history with the new prompt and response
-        history.append({'role': 'user', 'parts': [full_prompt]})
-        history.append({'role': 'assistant', 'parts': [response.text]})
+        clean_text = re.sub(r'[\n\t\r]', ' ', latest_response_text)  # Replace newlines, tabs, and carriage returns with a space
+        clean_response_text = re.sub(r'[^\x20-\x7E]', '', clean_text).strip()  # Remove all non-ASCII printable characters  
         
-        # Print the updated conversation history
-        #print("conversation_history:", conversation_history)
+        history.append({"metadata":None, "options":None, "role": "assistant", "content": ''})
         
-        return response, history
+        for char in clean_response_text:
+            time.sleep(0.005)
+            history[-1]['content'] += char
+            yield history
+    
+    elif "gemini" in model_type:
+        print("Using Gemini model:", model_type)
+        print("full_prompt:", full_prompt)
+
+        if isinstance(full_prompt, str):
+            full_prompt = [full_prompt]
+
+        system_prompt = "You are answering questions from the user based on source material. Respond with short, factually correct answers."
+
+        model, config = construct_gemini_generative_model(GEMINI_API_KEY, temperature, model_type, system_prompt, max_tokens)
+
+        responses, summary_conversation_history, whole_summary_conversation, whole_conversation_metadata = process_requests(full_prompt, system_prompt, conversation_history=[], whole_conversation=[], whole_conversation_metadata=[], model=model, config = config, model_choice = model_type, temperature = temperature)
+
+        if isinstance(responses[-1], ResponseObject):
+            response_texts = [resp.text for resp in responses]
+        elif "choices" in responses[-1]:
+            response_texts = [resp["choices"][0]['text'] for resp in responses]
+        else:
+            response_texts = [resp.text for resp in responses]
+
+        latest_response_text = response_texts[-1]
+
+        clean_text = re.sub(r'[\n\t\r]', ' ', latest_response_text)  # Replace newlines, tabs, and carriage returns with a space
+        clean_response_text = re.sub(r'[^\x20-\x7E]', '', clean_text).strip()  # Remove all non-ASCII printable characters   
+        
+        history.append({"metadata":None, "options":None, "role": "assistant", "content": ''})
+        
+        for char in clean_response_text:
+            time.sleep(0.005)
+            history[-1]['content'] += char
+            yield history
+
+        print("history at end of function:", history)
 
 # Chat helper functions
 
@@ -588,9 +711,6 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
 
 
             docs = vectorstore.similarity_search_with_score(new_question_kworded, k=k_val)
-
-            print("Docs from similarity search:")
-            print(docs)
 
             # Keep only documents with a certain score
             docs_len = [len(x[0].page_content) for x in docs]
@@ -688,12 +808,8 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
             # 3rd level check on retrieved docs with SVM retriever
             # Check the type of the embeddings object
             embeddings_type = type(embeddings)
-            print("Type of embeddings object:", embeddings_type)
 
 
-            print("embeddings:", embeddings)
-
-            from langchain_huggingface import HuggingFaceEmbeddings
             #hf_embeddings = HuggingFaceEmbeddings(**embeddings)
             hf_embeddings = embeddings
             
@@ -742,10 +858,6 @@ def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_p
                                
             # Make df of best options
             doc_df = create_doc_df(docs_keep_out)
-
-            print("doc_df:",doc_df)
-            print("docs_keep_as_doc:",docs_keep_as_doc)
-            print("docs_keep_out:", docs_keep_out)
 
             return docs_keep_as_doc, doc_df, docs_keep_out
 
@@ -836,16 +948,16 @@ def get_expanded_passages(vectorstore, docs, width):
 
     return expanded_docs, doc_df
 
-def highlight_found_text(search_text: str, full_text: str, hlt_chunk_size:int=hlt_chunk_size, hlt_strat:List=hlt_strat, hlt_overlap:int=hlt_overlap) -> str:
+def highlight_found_text(chat_history: list[dict], source_texts: list[dict], hlt_chunk_size:int=hlt_chunk_size, hlt_strat:List=hlt_strat, hlt_overlap:int=hlt_overlap) -> str:
     """
-    Highlights occurrences of search_text within full_text.
+    Highlights occurrences of chat_history within source_texts.
     
     Parameters:
-    - search_text (str): The text to be searched for within full_text.
-    - full_text (str): The text within which search_text occurrences will be highlighted.
+    - chat_history (str): The text to be searched for within source_texts.
+    - source_texts (str): The text within which chat_history occurrences will be highlighted.
     
     Returns:
-    - str: A string with occurrences of search_text highlighted.
+    - str: A string with occurrences of chat_history highlighted.
     
     Example:
     >>> highlight_found_text("world", "Hello, world! This is a test. Another world awaits.")
@@ -859,32 +971,31 @@ def highlight_found_text(search_text: str, full_text: str, hlt_chunk_size:int=hl
             return text[i][0].replace("  ", " ").strip()
         else:
             return ""
+        
+    print("chat_history:", chat_history)
+        
+    response_text = next(
+    (entry['content'] for entry in reversed(chat_history) if entry.get('role') == 'assistant'),
+    "")
 
-    def extract_search_text_from_input(text):
-        if isinstance(text, str):
-            return text.replace("  ", " ").strip()
-        elif isinstance(text, list):
-            return text[-1][1].replace("  ", " ").strip()
-        else:
-            return ""
+    print("response_text:", response_text)
+        
+    source_texts = extract_text_from_input(source_texts)
 
-    full_text = extract_text_from_input(full_text)
-    search_text = extract_search_text_from_input(search_text)
-
-
+    print("source_texts:", source_texts)
 
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=hlt_chunk_size,
         separators=hlt_strat,
         chunk_overlap=hlt_overlap,
     )
-    sections = text_splitter.split_text(search_text)
+    sections = text_splitter.split_text(response_text)
 
     found_positions = {}
     for x in sections:
         text_start_pos = 0
         while text_start_pos != -1:
-            text_start_pos = full_text.find(x, text_start_pos)
+            text_start_pos = source_texts.find(x, text_start_pos)
             if text_start_pos != -1:
                 found_positions[text_start_pos] = text_start_pos + len(x)
                 text_start_pos += 1
@@ -907,20 +1018,24 @@ def highlight_found_text(search_text: str, full_text: str, hlt_chunk_size:int=hl
     prev_end = 0
     for start, end in combined_positions:
         if end-start > 15: # Only combine if there is a significant amount of matched text. Avoids picking up single words like 'and' etc.
-            pos_tokens.append(full_text[prev_end:start])
-            pos_tokens.append('<mark style="color:black;">' + full_text[start:end] + '</mark>')
+            pos_tokens.append(source_texts[prev_end:start])
+            pos_tokens.append('<mark style="color:black;">' + source_texts[start:end] + '</mark>')
             prev_end = end
-    pos_tokens.append(full_text[prev_end:])
+    pos_tokens.append(source_texts[prev_end:])
 
-    return "".join(pos_tokens)
+    out_pos_tokens = "".join(pos_tokens)
+
+    print("out_pos_tokens:", out_pos_tokens)
+
+    return out_pos_tokens
 
 
 # # Chat history functions
 
 def clear_chat(chat_history_state, sources, chat_message, current_topic):
-    chat_history_state = []
+    chat_history_state = None
     sources = ''
-    chat_message = ''
+    chat_message = None
     current_topic = ''
 
     return chat_history_state, sources, chat_message, current_topic
@@ -1011,8 +1126,7 @@ def remove_q_stopwords(question): # Remove stopwords from question. Not used at 
     for word in tokens_without_sw:
         if word not in ordered_tokens:
             ordered_tokens.add(word)
-            result.append(word)
-     
+            result.append(word)   
 
 
     new_question_keywords = ' '.join(result)
@@ -1021,9 +1135,6 @@ def remove_q_stopwords(question): # Remove stopwords from question. Not used at 
 def remove_q_ner_extractor(question):
     
     predict_out = ner_model.predict(question)
-
-
-
     predict_tokens = [' '.join(v for k, v in d.items() if k == 'span') for d in predict_out]
 
     # Remove duplicate words while preserving order
@@ -1075,11 +1186,11 @@ def keybert_keywords(text, n, kw_model):
     return keywords_list
     
 # Gradio functions
-def turn_off_interactivity(user_message, history):
-        return gr.update(value="", interactive=False), history + [[user_message, None]]
+def turn_off_interactivity():
+        return gr.Textbox(interactive=False), gr.Button(interactive=False)
 
 def restore_interactivity():
-        return gr.update(interactive=True)
+        return gr.Textbox(interactive=True), gr.Button(interactive=True)
 
 def update_message(dropdown_value):
         return gr.Textbox(value=dropdown_value)

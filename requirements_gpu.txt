@@ -21,3 +21,4 @@ PyStemmer==2.2.0.3
 scipy==1.15.2
 numpy==1.26.4
 boto3==1.38.0
+python-dotenv==1.1.0
