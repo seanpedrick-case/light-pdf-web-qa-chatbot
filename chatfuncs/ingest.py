@@ -7,6 +7,7 @@ import requests
 import pandas as pd
 import dateutil.parser
 from typing import Type, List
+import shutil
 
 from langchain_community.embeddings import HuggingFaceEmbeddings # HuggingFaceInstructEmbeddings, 
 from langchain_community.vectorstores.faiss import FAISS
@@ -573,56 +574,50 @@ def load_embeddings(model_name = "BAAI/bge-base-en-v1.5"):
 
     return embeddings_func
 
-def embed_faiss_save_to_zip(docs_out, save_to="output", model_name = "BAAI/bge-base-en-v1.5"):
-
+def embed_faiss_save_to_zip(docs_out, save_to="output", model_name="BAAI/bge-base-en-v1.5"):
     load_embeddings(model_name=model_name)
-
-    #embeddings_fast = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
     print(f"> Total split documents: {len(docs_out)}")
 
     vectorstore = FAISS.from_documents(documents=docs_out, embedding=embeddings)
 
-    if not Path(save_to).exists(): 
-        os.mkdir(save_to)
+    save_to_path = Path(save_to)
+    save_to_path.mkdir(parents=True, exist_ok=True)
 
-    if Path(save_to).exists():
-        vectorstore.save_local(folder_path=save_to)
+    vectorstore.save_local(folder_path=str(save_to_path))
 
-    print("> DONE")
+    print("> FAISS index saved")
     print(f"> Saved to: {save_to}")
 
-    ### Save as zip, then remove faiss/pkl files to allow for upload to huggingface
+    # Ensure files are written before archiving
+    index_faiss = save_to_path / "index.faiss"
+    index_pkl = save_to_path / "index.pkl"
 
-    import shutil
+    if not index_faiss.exists() or not index_pkl.exists():
+        raise FileNotFoundError("Expected FAISS index files not found before zipping.")
 
-    shutil.make_archive(save_to, 'zip', save_to)
+    # Flush file system writes by forcing a sync (works best on Unix)
+    try:
+        os.sync()
+    except AttributeError:
+        pass  # os.sync() not available on Windows
 
-    os.remove(save_to + "/index.faiss")
-    os.remove(save_to + "/index.pkl")
+    # Create ZIP archive
+    final_zip_path = shutil.make_archive(str(save_to_path), 'zip', root_dir=str(save_to_path))
 
-    save_zip_out = save_to + "/" + save_to + '.zip'
+    # Remove individual index files to avoid leaking large raw files
+    index_faiss.unlink(missing_ok=True)
+    index_pkl.unlink(missing_ok=True)
 
-    shutil.move(save_to + '.zip', save_zip_out)
+    # Move ZIP inside the folder for easier reference
+    #final_zip_path = save_to_path.with_suffix('.zip')
 
-    out_message = "Document processing complete"
+    print("> Archive complete")
+    print(f"> Final ZIP path: {final_zip_path}")
 
-    return out_message, vectorstore, save_zip_out
+    return "Document processing complete", vectorstore, final_zip_path
 
-def docs_to_chroma_save(embeddings, docs_out:PandasDataFrame, save_to:str):
-    print(f"> Total split documents: {len(docs_out)}")
-    
-    vectordb = Chroma.from_documents(documents=docs_out, 
-                                 embedding=embeddings,
-                                 persist_directory=save_to)
-    
-    # persiste the db to disk
-    vectordb.persist()
-    
-    print("> DONE")
-    print(f"> Saved to: {save_to}")
-    
-    return vectordb
+
 
 def sim_search_local_saved_vec(query, k_val, save_to="faiss_lambeth_census_embedding"):
 

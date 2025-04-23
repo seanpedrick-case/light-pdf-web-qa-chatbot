@@ -8,7 +8,7 @@ print(borough_plan_text)
 borough_plan_docs = ing.text_to_docs(borough_plan_text)
 print("Borough plan docs created")
 
-embedding_model = "BAAI/bge-base-en-v1.5"
+embedding_model =  "BAAI/bge-base-en-v1.5" # "mixedbread-ai/mxbai-embed-xsmall-v1" #
 
 embeddings = ing.load_embeddings(model_name = embedding_model)
 ing.embed_faiss_save_to_zip(borough_plan_docs, save_to="faiss_embedding", model_name = embedding_model)

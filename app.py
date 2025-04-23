@@ -45,7 +45,7 @@ import chatfuncs.ingest as ing
 # Load preset embeddings, vectorstore, and model
 ###
 
-embeddings_name = "mixedbread-ai/mxbai-embed-xsmall-v1" #"BAAI/bge-base-en-v1.5"
+embeddings_name =  "BAAI/bge-base-en-v1.5" #"mixedbread-ai/mxbai-embed-xsmall-v1" 
 
 def load_embeddings(embeddings_name = embeddings_name):
 
@@ -185,7 +185,7 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 # RUN UI
 ###
 
-app = gr.Blocks(theme = gr.themes.Base())#css=".gradio-container {background-color: black}")
+app = gr.Blocks(theme = gr.themes.Base(), fill_width=True)#css=".gradio-container {background-color: black}")
 
 with app:
     ingest_text = gr.State()
@@ -243,9 +243,9 @@ with app:
                 lines=1,
             )     
         with gr.Row():
-            submit = gr.Button(value="Send message", variant="secondary", scale = 1)
-            clear = gr.Button(value="Clear chat", variant="secondary", scale=0) 
-            stop = gr.Button(value="Stop generating", variant="secondary", scale=0)
+            submit = gr.Button(value="Send message", variant="primary", scale = 4)
+            clear = gr.Button(value="Clear chat", variant="secondary", scale=1) 
+            stop = gr.Button(value="Stop generating", variant="secondary", scale=1)
 
         examples_set = gr.Radio(label="Examples for the Lambeth Borough Plan",
             #value = "What were the five pillars of the previous borough plan?",
@@ -296,45 +296,45 @@ with app:
     examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
 
     change_model_button.click(fn=chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
-    then(fn=load_model, inputs=[model_choice, gpu_layer_choice], outputs = [model_type_state, load_text, current_model]).\
-    then(lambda: chatf.restore_interactivity(), None, [message], queue=False).\
-    then(chatf.clear_chat, inputs=[chat_history_state, sources, message, current_topic], outputs=[chat_history_state, sources, message, current_topic]).\
-    then(lambda: None, None, chatbot, queue=False)
+    success(fn=load_model, inputs=[model_choice, gpu_layer_choice], outputs = [model_type_state, load_text, current_model]).\
+    success(lambda: chatf.restore_interactivity(), None, [message], queue=False).\
+    success(chatf.clear_chat, inputs=[chat_history_state, sources, message, current_topic], outputs=[chat_history_state, sources, message, current_topic]).\
+    success(lambda: None, None, chatbot, queue=False)
 
     # Load in a pdf
     load_pdf_click = load_pdf.click(ing.parse_file, inputs=[in_pdf], outputs=[ingest_text, current_source]).\
-             then(ing.text_to_docs, inputs=[ingest_text], outputs=[ingest_docs]).\
-             then(embed_faiss_save_to_zip, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state, file_out_box]).\
-             then(chatf.hide_block, outputs = [examples_set])
+             success(ing.text_to_docs, inputs=[ingest_text], outputs=[ingest_docs]).\
+             success(embed_faiss_save_to_zip, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state, file_out_box]).\
+             success(chatf.hide_block, outputs = [examples_set])
 
     # Load in a webpage
     load_web_click = load_web.click(ing.parse_html, inputs=[in_web, in_div], outputs=[ingest_text, ingest_metadata, current_source]).\
-             then(ing.html_text_to_docs, inputs=[ingest_text, ingest_metadata], outputs=[ingest_docs]).\
-             then(embed_faiss_save_to_zip, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state, file_out_box]).\
-             then(chatf.hide_block, outputs = [examples_set])
+             success(ing.html_text_to_docs, inputs=[ingest_text, ingest_metadata], outputs=[ingest_docs]).\
+             success(embed_faiss_save_to_zip, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state, file_out_box]).\
+             success(chatf.hide_block, outputs = [examples_set])
     
     # Load in a csv/excel file
     load_csv_click = load_csv.click(ing.parse_csv_or_excel, inputs=[in_csv, in_text_column], outputs=[ingest_text, current_source]).\
-             then(ing.csv_excel_text_to_docs, inputs=[ingest_text, in_text_column], outputs=[ingest_docs]).\
-             then(embed_faiss_save_to_zip, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state, file_out_box]).\
-             then(chatf.hide_block, outputs = [examples_set])
+             success(ing.csv_excel_text_to_docs, inputs=[ingest_text, in_text_column], outputs=[ingest_docs]).\
+             success(embed_faiss_save_to_zip, inputs=[ingest_docs], outputs=[ingest_embed_out, vectorstore_state, file_out_box]).\
+             success(chatf.hide_block, outputs = [examples_set])
 
     # Load in a webpage
 
     # Click/enter to send message action
     response_click = submit.click(chatf.create_full_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state, model_type_state, out_passages, api_model_choice, in_api_key], outputs=[chat_history_state, sources, instruction_prompt_out, relevant_query_state], queue=False, api_name="retrieval").\
-                then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
-                then(chatf.produce_streaming_answer_chatbot, inputs=[chatbot, instruction_prompt_out, model_type_state, temp_slide, relevant_query_state], outputs=chatbot)
-    response_click.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\
-                then(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
-                then(lambda: chatf.restore_interactivity(), None, [message], queue=False)
+                success(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
+                success(chatf.produce_streaming_answer_chatbot, inputs=[chatbot, instruction_prompt_out, model_type_state, temp_slide, relevant_query_state], outputs=chatbot)
+    response_click.success(chatf.highlight_found_text, [chatbot, sources], [sources]).\
+                success(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
+                success(lambda: chatf.restore_interactivity(), None, [message], queue=False)
 
     response_enter = message.submit(chatf.create_full_prompt, inputs=[message, chat_history_state, current_topic, vectorstore_state, embeddings_state, model_type_state, out_passages, api_model_choice, in_api_key], outputs=[chat_history_state, sources, instruction_prompt_out, relevant_query_state], queue=False).\
-                then(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
-                then(chatf.produce_streaming_answer_chatbot, [chatbot, instruction_prompt_out, model_type_state, temp_slide, relevant_query_state], chatbot)    
-    response_enter.then(chatf.highlight_found_text, [chatbot, sources], [sources]).\
-                then(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
-                then(lambda: chatf.restore_interactivity(), None, [message], queue=False)
+                success(chatf.turn_off_interactivity, inputs=[message, chatbot], outputs=[message, chatbot], queue=False).\
+                success(chatf.produce_streaming_answer_chatbot, [chatbot, instruction_prompt_out, model_type_state, temp_slide, relevant_query_state], chatbot)    
+    response_enter.success(chatf.highlight_found_text, [chatbot, sources], [sources]).\
+                success(chatf.add_inputs_answer_to_history,[message, chatbot, current_topic], [chat_history_state, current_topic]).\
+                success(lambda: chatf.restore_interactivity(), None, [message], queue=False)
     
     # Stop box
     stop.click(fn=None, inputs=None, outputs=None, cancels=[response_click, response_enter])
@@ -356,7 +356,7 @@ with app:
     access_callback.setup([session_hash_textbox], access_logs_data_folder)
 
     session_hash_textbox.change(lambda *args: access_callback.flag(list(args)), [session_hash_textbox], None, preprocess=False).\
-    then(fn = upload_file_to_s3, inputs=[access_logs_state, access_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
+    success(fn = upload_file_to_s3, inputs=[access_logs_state, access_s3_logs_loc_state], outputs=[s3_logs_output_textbox])
 
 # Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
