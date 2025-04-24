@@ -23,8 +23,7 @@ QUESTION - {question}
 """
 
 
-instruction_prompt_template_orca = """
-### System:
+instruction_prompt_template_orca = """### System:
 You are an AI assistant that follows instruction extremely well. Help as much as you can.
 ### User:
 Answer the QUESTION with a short response using information from the following CONTENT.
@@ -33,8 +32,7 @@ CONTENT: {summaries}
 
 ### Response:"""
 
-instruction_prompt_template_orca_quote = """
-### System:
+instruction_prompt_template_orca_quote = """### System:
 You are an AI assistant that follows instruction extremely well. Help as much as you can.
 ### User:
 Quote text from the CONTENT to answer the QUESTION below.
@@ -74,3 +72,8 @@ CONTENT: {summaries}
 QUESTION: {question}\n
 Answer:<|im_end|>
 <|im_start|>assistant\n"""
+
+instruction_prompt_gemma = """Answer the QUESTION using information from the following CONTENT. Respond with short answers that directly answer the question.
+CONTENT: {summaries}
+QUESTION: {question}
+assistant:"""

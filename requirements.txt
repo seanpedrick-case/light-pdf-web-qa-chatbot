@@ -4,7 +4,7 @@ langchain-community==0.3.22
 beautifulsoup4==4.13.4
 google-generativeai==0.8.5
 pandas==2.2.3
-transformers==4.41.2
+transformers==4.51.3
 # For Windows https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.2/llama_cpp_python-0.3.2-cp311-cp311-win_amd64.whl -C cmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS" 
 llama-cpp-python==0.3.2 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 #-C cmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS"
@@ -22,3 +22,4 @@ PyStemmer==2.2.0.3
 scipy==1.15.2
 numpy==1.26.4
 boto3==1.38.0
+python-dotenv==1.1.0

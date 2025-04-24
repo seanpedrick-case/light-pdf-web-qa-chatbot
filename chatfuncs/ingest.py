@@ -7,13 +7,14 @@ import requests
 import pandas as pd
 import dateutil.parser
 from typing import Type, List
-import shutil
+#import shutil
 
-from langchain_community.embeddings import HuggingFaceEmbeddings # HuggingFaceInstructEmbeddings, 
+#from langchain_community.embeddings import HuggingFaceEmbeddings # HuggingFaceInstructEmbeddings, 
 from langchain_community.vectorstores.faiss import FAISS
 #from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
+#from chatfuncs.config import EMBEDDINGS_MODEL_NAME
 
 from bs4 import BeautifulSoup
 from docx import Document as Doc
@@ -557,31 +558,24 @@ def docs_elements_from_csv_save(docs_path="documents.csv"):
 
 # ## Create embeddings and save faiss vector store to the path specified in `save_to`
 
-def load_embeddings(model_name = "BAAI/bge-base-en-v1.5"):
+# def load_embeddings_model(embeddings_model = EMBEDDINGS_MODEL_NAME):
 
-    #if model_name == "hkunlp/instructor-large":
-    #    embeddings_func = HuggingFaceInstructEmbeddings(model_name=model_name,
-    #    embed_instruction="Represent the paragraph for retrieval: ",
-    #    query_instruction="Represent the question for retrieving supporting documents: "
-    #    )
+#     embeddings_func = HuggingFaceEmbeddings(model_name=embeddings_model)
 
-    #else: 
-    embeddings_func = HuggingFaceEmbeddings(model_name=model_name)
+#     #global embeddings
 
-    global embeddings
+#     #embeddings = embeddings_func
 
-    embeddings = embeddings_func
+#     return embeddings_func
 
-    return embeddings_func
-
-def embed_faiss_save_to_zip(docs_out, save_to="output", model_name="BAAI/bge-base-en-v1.5"):
-    load_embeddings(model_name=model_name)
+def embed_faiss_save_to_zip(docs_out, save_folder, embeddings_model_object, save_to="faiss_embeddings", model_name="BAAI/bge-base-en-v1.5"):
+    #load_embeddings(model_name=model_name)
 
     print(f"> Total split documents: {len(docs_out)}")
 
-    vectorstore = FAISS.from_documents(documents=docs_out, embedding=embeddings)
+    vectorstore = FAISS.from_documents(documents=docs_out, embedding=embeddings_model_object)
 
-    save_to_path = Path(save_to)
+    save_to_path = Path(save_folder, save_to)
     save_to_path.mkdir(parents=True, exist_ok=True)
 
     vectorstore.save_local(folder_path=str(save_to_path))
@@ -619,20 +613,20 @@ def embed_faiss_save_to_zip(docs_out, save_to="output", model_name="BAAI/bge-bas
 
 
 
-def sim_search_local_saved_vec(query, k_val, save_to="faiss_lambeth_census_embedding"):
+# def sim_search_local_saved_vec(query, k_val, save_to="faiss_lambeth_census_embedding"):
 
-    load_embeddings()
+#     load_embeddings()
 
-    docsearch = FAISS.load_local(folder_path=save_to, embeddings=embeddings)
+#     docsearch = FAISS.load_local(folder_path=save_to, embeddings=embeddings)
 
 
-    display(Markdown(question))
+#     display(Markdown(question))
 
-    search = docsearch.similarity_search_with_score(query, k=k_val)
+#     search = docsearch.similarity_search_with_score(query, k=k_val)
 
-    for item in search:
-        print(item[0].page_content)
-        print(f"Page: {item[0].metadata['source']}")
-        print(f"Date: {item[0].metadata['date']}")
-        print(f"Score: {item[1]}")
-        print("---")
+#     for item in search:
+#         print(item[0].page_content)
+#         print(f"Page: {item[0].metadata['source']}")
+#         print(f"Date: {item[0].metadata['date']}")
+#         print(f"Score: {item[1]}")
+#         print("---")
