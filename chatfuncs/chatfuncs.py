@@ -32,7 +32,7 @@ from langchain_community.retrievers import SVMRetriever
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 
-from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen, instruction_prompt_template_orca, instruction_prompt_gemma
+from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen, instruction_prompt_template_orca, instruction_prompt_gemma, instruction_prompt_template_gemini_aws
 from chatfuncs.model_load import temperature, max_new_tokens, sample, repetition_penalty, top_p, top_k, torch_device, CtransGenGenerationConfig, max_tokens
 from chatfuncs.config import GEMINI_API_KEY, AWS_DEFAULT_REGION, LARGE_MODEL_NAME, SMALL_MODEL_NAME, RUN_AWS_FUNCTIONS, FEEDBACK_LOGS_FOLDER
 
@@ -136,11 +136,11 @@ def base_prompt_templates(model_type:str = SMALL_MODEL_NAME):
 # The main prompt:  
 
     if model_type == SMALL_MODEL_NAME:
-        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_qwen, input_variables=['question', 'summaries'])
+        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_gemma, input_variables=['question', 'summaries'])
     elif model_type == LARGE_MODEL_NAME:
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_phi3, input_variables=['question', 'summaries'])
     else:
-        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_orca, input_variables=['question', 'summaries'])
+        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_gemini_aws, input_variables=['question', 'summaries'])
         
 
     return INSTRUCTION_PROMPT, CONTENT_PROMPT
@@ -507,7 +507,6 @@ def produce_streaming_answer_chatbot(
                     new_text = ""
                 history[-1]['content'] += new_text
                 NUM_TOKENS += 1
-                history[-1]['content'] = history[-1]['content'].replace('<|im_end|>','')
                 yield history
             except Exception as e:
                 print(f"Error during text generation: {e}")
@@ -543,7 +542,6 @@ def produce_streaming_answer_chatbot(
             if "choices" in out and len(out["choices"]) > 0 and "text" in out["choices"][0]:
                 history[-1]['content'] += out["choices"][0]["text"]
                 NUM_TOKENS+=1
-                history[-1]['content'] = history[-1]['content'].replace('<|im_end|>','')
                 yield history
             else:
                 print(f"Unexpected output structure: {out}") 
@@ -557,7 +555,7 @@ def produce_streaming_answer_chatbot(
         print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
     elif "claude" in model_type:
-        system_prompt = "You are answering questions from the user based on source material. Respond with short, factually correct answers."
+        system_prompt = "You are answering questions from the user based on source material. Make sure to fully answer the questions with all required detail."
 
         print("full_prompt:", full_prompt)
 
@@ -595,13 +593,11 @@ def produce_streaming_answer_chatbot(
         elif GEMINI_API_KEY: gemini_api_key = GEMINI_API_KEY
         else: raise Exception("Gemini API key not found. Please enter a key on the Advanced settings page or select another model type")
 
-        print("Using Gemini model:", model_type)
-        print("full_prompt:", full_prompt)
-
+        
         if isinstance(full_prompt, str):
             full_prompt = [full_prompt]
 
-        system_prompt = "You are answering questions from the user based on source material. Respond with short, factually correct answers."
+        system_prompt = "You are answering questions from the user based on source material. Make sure to fully answer the questions with all required detail."
 
         model, config = construct_gemini_generative_model(gemini_api_key, temperature, model_type, system_prompt, max_tokens)
 

@@ -73,7 +73,14 @@ QUESTION: {question}\n
 Answer:<|im_end|>
 <|im_start|>assistant\n"""
 
-instruction_prompt_gemma = """Answer the QUESTION using information from the following CONTENT. Respond with short answers that directly answer the question.
+instruction_prompt_gemma = """<start_of_turn>user
+Answer the QUESTION using information from the following CONTENT. Make sure to fully answer the question with all required detail.
+CONTENT: {summaries}
+QUESTION: {question}<end_of_turn>
+<start_of_turn>model
+"""
+
+instruction_prompt_template_gemini_aws = """Answer the QUESTION with a using information from the following CONTENT. Make sure to fully answer the question with all required detail.
 CONTENT: {summaries}
 QUESTION: {question}
-assistant:"""
+Answer:"""

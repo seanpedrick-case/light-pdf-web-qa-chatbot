@@ -1,0 +1,2 @@
+docker build -t qa_chatbot .
+docker run -p 7860:7860 -e HF_TOKEN=<token> qa_chatbot # HF_TOKEN is required to download Gemma 3
