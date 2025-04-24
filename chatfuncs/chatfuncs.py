@@ -34,7 +34,7 @@ from langchain.docstore.document import Document
 
 from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen, instruction_prompt_template_orca, instruction_prompt_gemma
 from chatfuncs.model_load import temperature, max_new_tokens, sample, repetition_penalty, top_p, top_k, torch_device, CtransGenGenerationConfig, max_tokens
-from chatfuncs.config import GEMINI_API_KEY, AWS_DEFAULT_REGION, LARGE_MODEL_NAME, SMALL_MODEL_NAME
+from chatfuncs.config import GEMINI_API_KEY, AWS_DEFAULT_REGION, LARGE_MODEL_NAME, SMALL_MODEL_NAME, RUN_AWS_FUNCTIONS
 
 model_object = [] # Define empty list for model functions to run
 tokenizer = [] # Define empty list for model functions to run
@@ -45,7 +45,10 @@ class ResponseObject:
         self.text = text
         self.usage_metadata = usage_metadata
 
-bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_DEFAULT_REGION)
+if RUN_AWS_FUNCTIONS=="1":
+    bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_DEFAULT_REGION)
+else:
+    bedrock_runtime = ""
 
 torch.cuda.empty_cache()
 
