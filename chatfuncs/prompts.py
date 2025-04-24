@@ -72,3 +72,8 @@ CONTENT: {summaries}
 QUESTION: {question}\n
 Answer:<|im_end|>
 <|im_start|>assistant\n"""
+
+instruction_prompt_gemma = """Answer the QUESTION using information from the following CONTENT. Respond with short answers that directly answer the question.
+CONTENT: {summaries}
+QUESTION: {question}
+assistant:"""

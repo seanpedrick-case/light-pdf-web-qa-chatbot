@@ -165,6 +165,8 @@ DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var('DISPLAY_FILE_NAMES_IN_LOGS',
 # RUN CONFIG
 GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
 
+HF_TOKEN = get_or_create_env_var('HF_TOKEN', '')
+
 
 # Number of pages to loop through before breaking the function and restarting from the last finished page (not currently activated).
 PAGE_BREAK_VALUE = get_or_create_env_var('PAGE_BREAK_VALUE', '99999')
@@ -174,6 +176,37 @@ MAX_TIME_VALUE = get_or_create_env_var('MAX_TIME_VALUE', '999999')
 ###
 # APP RUN CONFIG
 ###
+
+SMALL_MODEL_NAME = get_or_create_env_var("SMALL_MODEL_NAME", "Gemma 3 1B (small, fast)") # "Qwen 2 0.5B (small, fast)"
+
+SMALL_MODEL_REPO_ID = get_or_create_env_var("SMALL_MODEL_REPO_ID", 'google/gemma-3-1b-it') #'Qwen/Qwen2-0.5B-Instruct')
+
+LARGE_MODEL_NAME = get_or_create_env_var("LARGE_MODEL_NAME", "Phi 3.5 Mini (larger, slow)")
+
+LARGE_MODEL_REPO_ID = get_or_create_env_var("LARGE_MODEL_REPO_ID", "QuantFactory/Phi-3.5-mini-instruct-GGUF") # "QuantFactory/Phi-3-mini-128k-instruct-GGUF"), # "QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-v2"), #"microsoft/Phi-3-mini-4k-instruct-gguf"),#"TheBloke/Mistral-7B-OpenOrca-GGUF"),
+LARGE_MODEL_GGUF_FILE = get_or_create_env_var("LARGE_MODEL_GGUF_FILE", "Phi-3.5-mini-instruct.Q4_K_M.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")  #"Meta-Llama-3-8B-Instruct-v2.Q6_K.gguf") #"Phi-3-mini-4k-instruct-q4.gguf")#"mistral-7b-openorca.Q4_K_M.gguf"),
+
+if RUN_AWS_FUNCTIONS == "1":
+    default_model_choices = f'["{SMALL_MODEL_NAME}", "{LARGE_MODEL_NAME}", "gemini-2.0-flash-001", "gemini-2.5-flash-preview-04-17", "gemini-2.5-pro-preview-03-25", "anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"]'
+else:
+    default_model_choices = f'["{SMALL_MODEL_NAME}", "{LARGE_MODEL_NAME}", "gemini-2.0-flash-001", "gemini-2.5-flash-preview-04-17", "gemini-2.5-pro-preview-03-25"]'
+
+DEFAULT_MODEL_CHOICES = get_or_create_env_var("DEFAULT_MODEL_CHOICES", default_model_choices)
+
+EMBEDDINGS_MODEL_NAME = get_or_create_env_var('EMBEDDINGS_MODEL_NAME', "BAAI/bge-base-en-v1.5") #"mixedbread-ai/mxbai-embed-xsmall-v1"
+
+DEFAULT_EMBEDDINGS_LOCATION = get_or_create_env_var('DEFAULT_EMBEDDINGS_LOCATION', "faiss_embedding")
+
+DEFAULT_DATA_SOURCE_NAME = get_or_create_env_var('DEFAULT_DATA_SOURCE_NAME', "Document redaction app documentation")
+
+DEFAULT_DATA_SOURCE = get_or_create_env_var('DEFAULT_DATA_SOURCE', "https://seanpedrick-case.github.io/doc_redaction/README.html")
+
+DEFAULT_EXAMPLES = get_or_create_env_var('DEFAULT_EXAMPLES', '[ "How can I make a custom deny list?", "How can I find page duplicates?", "How can I review and modify existing redactions?", "How can I export my review files to Adobe?"]')
+                # 
+                # ') # ["What were the five pillars of the previous borough plan?",
+                #"What is the vision statement for Lambeth?",
+                #"What are the commitments for Lambeth?",
+                #"What are the 2030 outcomes for Lambeth?"]
 
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')

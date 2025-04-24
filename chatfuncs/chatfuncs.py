@@ -5,46 +5,11 @@ from typing import Type, Dict, List, Tuple
 import time
 from itertools import compress
 import pandas as pd
-import numpy as np
 import google.generativeai as ai
+import gradio as gr
 from gradio import Progress
 import boto3
 import json
-
-# Model packages
-import torch.cuda
-from threading import Thread
-from transformers import pipeline, TextIteratorStreamer
-from langchain_huggingface import HuggingFaceEmbeddings
-
-# Alternative model sources
-#from dataclasses import asdict, dataclass
-
-# Langchain functions
-from langchain.prompts import PromptTemplate
-from langchain_community.vectorstores import FAISS
-from langchain_community.retrievers import SVMRetriever 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.docstore.document import Document
-
-from chatfuncs.config import GEMINI_API_KEY, AWS_DEFAULT_REGION
-
-model_object = [] # Define empty list for model functions to run
-tokenizer = [] # Define empty list for model functions to run
-
-from chatfuncs.model_load import temperature, max_new_tokens, sample, repetition_penalty, top_p, top_k, torch_device, CtransGenGenerationConfig, max_tokens
-
-# ResponseObject class for AWS Bedrock calls
-class ResponseObject:
-    def __init__(self, text, usage_metadata):
-        self.text = text
-        self.usage_metadata = usage_metadata
-
-bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_DEFAULT_REGION)
-
-# For keyword extraction (not currently used)
-#import nltk
-#nltk.download('wordnet')
 from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
@@ -56,23 +21,44 @@ from keybert import KeyBERT
 # For BM25 retrieval
 import bm25s
 import Stemmer
+# Model packages
+import torch.cuda
+from threading import Thread
+from transformers import pipeline, TextIteratorStreamer
+# Langchain functions
+from langchain.prompts import PromptTemplate
+from langchain_community.vectorstores import FAISS
+from langchain_community.retrievers import SVMRetriever 
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.docstore.document import Document
 
-from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen, instruction_prompt_template_orca
+from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen, instruction_prompt_template_orca, instruction_prompt_gemma
+from chatfuncs.model_load import temperature, max_new_tokens, sample, repetition_penalty, top_p, top_k, torch_device, CtransGenGenerationConfig, max_tokens
+from chatfuncs.config import GEMINI_API_KEY, AWS_DEFAULT_REGION, LARGE_MODEL_NAME, SMALL_MODEL_NAME
 
-import gradio as gr
+model_object = [] # Define empty list for model functions to run
+tokenizer = [] # Define empty list for model functions to run
+
+# ResponseObject class for AWS Bedrock calls
+class ResponseObject:
+    def __init__(self, text, usage_metadata):
+        self.text = text
+        self.usage_metadata = usage_metadata
+
+bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_DEFAULT_REGION)
 
 torch.cuda.empty_cache()
 
 PandasDataFrame = Type[pd.DataFrame]
 
 embeddings = None  # global variable setup
+embeddings_model = None  # global variable setup
 vectorstore = None # global variable setup
 model_type = None # global variable setup
 
 max_memory_length = 0 # How long should the memory of the conversation last?
 
 source_texts = "" # Define dummy source text (full text) just to enable highlight function to load
-
 
 ## Highlight text constants
 hlt_chunk_size = 12
@@ -88,37 +74,51 @@ kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniL
 
 # Vectorstore funcs
 
-def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
+# def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
 
-    print(f"> Total split documents: {len(docs_out)}")
+#     print(f"> Total split documents: {len(docs_out)}")
 
-    vectorstore_func = FAISS.from_documents(documents=docs_out, embedding=embeddings)
+#     vectorstore_func = FAISS.from_documents(documents=docs_out, embedding=embeddings)
         
-    '''  
-    #with open("vectorstore.pkl", "wb") as f:
-        #pickle.dump(vectorstore, f) 
-    ''' 
+#     '''  
+#     #with open("vectorstore.pkl", "wb") as f:
+#         #pickle.dump(vectorstore, f) 
+#     ''' 
 
-    #if Path(save_to).exists():
-    #    vectorstore_func.save_local(folder_path=save_to)
-    #else:
-    #    os.mkdir(save_to)
-    #    vectorstore_func.save_local(folder_path=save_to)
+#     #if Path(save_to).exists():
+#     #    vectorstore_func.save_local(folder_path=save_to)
+#     #else:
+#     #    os.mkdir(save_to)
+#     #    vectorstore_func.save_local(folder_path=save_to)
 
-    global vectorstore
+#     global vectorstore
 
-    vectorstore = vectorstore_func
+#     vectorstore = vectorstore_func
 
-    out_message = "Document processing complete"
+#     out_message = "Document processing complete"
 
-    #print(out_message)
-    #print(f"> Saved to: {save_to}")
+#     #print(out_message)
+#     #print(f"> Saved to: {save_to}")
 
-    return out_message
+#     return out_message
+
+# def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings_model=embeddings_model):
+
+#     print(f"> Total split documents: {len(docs_out)}")
+
+#     print(docs_out)
+
+#     vectorstore_func = FAISS.from_documents(documents=docs_out, embedding=embeddings_model)
+
+#     vectorstore = vectorstore_func
+
+#     out_message = "Document processing complete"
+
+#     return out_message, vectorstore_func
 
 # Prompt functions
 
-def base_prompt_templates(model_type:str = "Qwen 2 0.5B (small, fast)"):    
+def base_prompt_templates(model_type:str = SMALL_MODEL_NAME):    
   
     #EXAMPLE_PROMPT = PromptTemplate(
     #    template="\nCONTENT:\n\n{page_content}\n\nSOURCE: {source}\n\n",
@@ -132,9 +132,9 @@ def base_prompt_templates(model_type:str = "Qwen 2 0.5B (small, fast)"):
 
 # The main prompt:  
 
-    if model_type == "Qwen 2 0.5B (small, fast)":
+    if model_type == SMALL_MODEL_NAME:
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_qwen, input_variables=['question', 'summaries'])
-    elif model_type == "Phi 3.5 Mini (larger, slow)":
+    elif model_type == LARGE_MODEL_NAME:
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_phi3, input_variables=['question', 'summaries'])
     else:
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_orca, input_variables=['question', 'summaries'])
@@ -146,7 +146,7 @@ def write_out_metadata_as_string(metadata_in:str):
     metadata_string = [f"{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}" for d in metadata_in] # ['metadata']
     return metadata_string
 
-def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt:str, content_prompt:str, extracted_memory:list, vectorstore:object, embeddings:object, relevant_flag:bool = True, out_passages:int = 2): # , 
+def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt:str, content_prompt:str, extracted_memory:list, vectorstore:object, embeddings:object, relevant_flag:bool = True, out_passages:int = 2, total_output_passage_chunks_size:int=5): # , 
         
     question =  inputs["question"]
     chat_history = inputs["chat_history"]
@@ -172,7 +172,7 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt:str, con
 
     # Only expand passages if not tabular data
     if (file_type != ".csv") & (file_type != ".xlsx"):
-        docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=3)    
+        docs_keep_as_doc, doc_df = get_expanded_passages(vectorstore, docs_keep_out, width=total_output_passage_chunks_size)    
 
     # Build up sources content to add to user display
     doc_df['meta_clean'] = write_out_metadata_as_string(doc_df["metadata"]) # [f"<b>{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}</b>" for d in doc_df['metadata']]
@@ -188,9 +188,6 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt:str, con
     sources_docs_content_string = '<br><br>'.join(doc_df['content_meta'])#.replace("  "," ")#.strip()
     
     instruction_prompt_out = instruction_prompt.format(question=new_question_kworded, summaries=docs_content_string)
-    
-    print('Final prompt is: ')
-    print(instruction_prompt_out)
             
     return instruction_prompt_out, sources_docs_content_string, new_question_kworded
 
@@ -201,9 +198,11 @@ def create_full_prompt(user_input:str,
                        embeddings:object,
                        model_type:str,
                        out_passages:list[str],
-                       api_model_choice=None,
-                       api_key=None,
-                       relevant_flag = True):
+                       api_key:str="",
+                       relevant_flag:bool=True):
+    
+    if "gemini" in model_type and not GEMINI_API_KEY and not api_key:
+        raise Exception("Gemini model selected but no API key found. Please enter an API key on the Advanced settings page.")
     
     #if chain_agent is None:
     #    history.append((user_input, "Please click the button to submit the Huggingface API key before using the chatbot (top right)"))
@@ -211,14 +210,6 @@ def create_full_prompt(user_input:str,
     print("\n==== date/time: " + str(datetime.datetime.now()) + " ====")
         
     history = history or []
-
-    if api_model_choice and api_model_choice != "None":
-         print("API model choice detected")
-         if api_key:
-            print("API key detected")
-            return history, "", None, relevant_flag       
-         else:
-            return history, "", None, relevant_flag
          
     # Create instruction prompt
     instruction_prompt, content_prompt = base_prompt_templates(model_type=model_type)
@@ -228,17 +219,12 @@ def create_full_prompt(user_input:str,
         relevant_flag = False
     else:
         relevant_flag = True
-
-    print("User input:", user_input)
    
     instruction_prompt_out, docs_content_string, new_question_kworded =\
                 generate_expanded_prompt({"question": user_input, "chat_history": history}, #vectorstore,
                                     instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings, relevant_flag, out_passages)
   
     history.append({"metadata":None, "options":None, "role": 'user', "content": user_input})
-    
-    print("Output history is:", history)
-    print("Final prompt to model is:",instruction_prompt_out)
         
     return history, docs_content_string, instruction_prompt_out, relevant_flag
 
@@ -457,13 +443,13 @@ def produce_streaming_answer_chatbot(
             temperature:float=temperature,
             relevant_query_bool:bool=True,
             chat_history:list[dict]=[{"metadata":None, "options":None, "role": 'user', "content": ""}],
+            in_api_key:str=GEMINI_API_KEY,
             max_new_tokens:int=max_new_tokens,
             sample:bool=sample,
             repetition_penalty:float=repetition_penalty,
             top_p:float=top_p,
             top_k:float=top_k,
-            max_tokens:int=max_tokens,
-            in_api_key:str=GEMINI_API_KEY
+            max_tokens:int=max_tokens            
 ):
     #print("Model type is: ", model_type)
 
@@ -483,9 +469,8 @@ def produce_streaming_answer_chatbot(
         yield history
         return
 
-    if model_type == "Qwen 2 0.5B (small, fast)": 
+    if model_type == SMALL_MODEL_NAME: 
 
-        print("tokenizer:", tokenizer)
         # Get the model and tokenizer, and tokenize the user text.
         model_inputs = tokenizer(text=full_prompt, return_tensors="pt", return_attention_mask=False).to(torch_device)
         
@@ -503,8 +488,6 @@ def produce_streaming_answer_chatbot(
             top_k=top_k
         )
 
-        print("model_object:", model_object)
-
         t = Thread(target=model_object.generate, kwargs=generate_kwargs)
         t.start()
 
@@ -521,6 +504,7 @@ def produce_streaming_answer_chatbot(
                     new_text = ""
                 history[-1]['content'] += new_text
                 NUM_TOKENS += 1
+                history[-1]['content'] = history[-1]['content'].replace('<|im_end|>','')
                 yield history
             except Exception as e:
                 print(f"Error during text generation: {e}")
@@ -533,7 +517,7 @@ def produce_streaming_answer_chatbot(
         print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
         print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
-    elif model_type == "Phi 3.5 Mini (larger, slow)":
+    elif model_type == LARGE_MODEL_NAME:
         #tokens = model.tokenize(full_prompt)
 
         gen_config = CtransGenGenerationConfig()
@@ -556,6 +540,7 @@ def produce_streaming_answer_chatbot(
             if "choices" in out and len(out["choices"]) > 0 and "text" in out["choices"][0]:
                 history[-1]['content'] += out["choices"][0]["text"]
                 NUM_TOKENS+=1
+                history[-1]['content'] = history[-1]['content'].replace('<|im_end|>','')
                 yield history
             else:
                 print(f"Unexpected output structure: {out}") 
@@ -602,6 +587,11 @@ def produce_streaming_answer_chatbot(
             yield history
     
     elif "gemini" in model_type:
+
+        if in_api_key: gemini_api_key = in_api_key
+        elif GEMINI_API_KEY: gemini_api_key = GEMINI_API_KEY
+        else: raise Exception("Gemini API key not found. Please enter a key on the Advanced settings page or select another model type")
+
         print("Using Gemini model:", model_type)
         print("full_prompt:", full_prompt)
 
@@ -610,7 +600,7 @@ def produce_streaming_answer_chatbot(
 
         system_prompt = "You are answering questions from the user based on source material. Respond with short, factually correct answers."
 
-        model, config = construct_gemini_generative_model(GEMINI_API_KEY, temperature, model_type, system_prompt, max_tokens)
+        model, config = construct_gemini_generative_model(gemini_api_key, temperature, model_type, system_prompt, max_tokens)
 
         responses, summary_conversation_history, whole_summary_conversation, whole_conversation_metadata = process_requests(full_prompt, system_prompt, conversation_history=[], whole_conversation=[], whole_conversation_metadata=[], model=model, config = config, model_choice = model_type, temperature = temperature)
 
@@ -977,12 +967,8 @@ def highlight_found_text(chat_history: list[dict], source_texts: list[dict], hlt
     response_text = next(
     (entry['content'] for entry in reversed(chat_history) if entry.get('role') == 'assistant'),
     "")
-
-    print("response_text:", response_text)
         
     source_texts = extract_text_from_input(source_texts)
-
-    print("source_texts:", source_texts)
 
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=hlt_chunk_size,
@@ -1024,8 +1010,6 @@ def highlight_found_text(chat_history: list[dict], source_texts: list[dict], hlt
     pos_tokens.append(source_texts[prev_end:])
 
     out_pos_tokens = "".join(pos_tokens)
-
-    print("out_pos_tokens:", out_pos_tokens)
 
     return out_pos_tokens
 
