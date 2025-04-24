@@ -216,7 +216,7 @@ DEFAULT_DATA_SOURCE_NAME = get_or_create_env_var('DEFAULT_DATA_SOURCE_NAME', "Do
 
 DEFAULT_DATA_SOURCE = get_or_create_env_var('DEFAULT_DATA_SOURCE', "https://seanpedrick-case.github.io/doc_redaction/README.html")
 
-DEFAULT_EXAMPLES = get_or_create_env_var('DEFAULT_EXAMPLES', '[ "How can I make a custom deny list?", "How can I find page duplicates?", "How can I review and modify existing redactions?", "How can I export my review files to Adobe?"]')
+DEFAULT_EXAMPLES = get_or_create_env_var('DEFAULT_EXAMPLES', '[ "How can I make a custom deny list?", "How can I find duplicate pages in a document?", "How can I review and modify existing redactions?", "How can I export my review files to Adobe?"]')
                 # 
                 # ') # ["What were the five pillars of the previous borough plan?",
                 #"What is the vision statement for Lambeth?",

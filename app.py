@@ -223,7 +223,7 @@ with app:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown(f"""Chat with PDF, web page or (new) csv/Excel documents. The default is a small model ({SMALL_MODEL_NAME}), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative ({LARGE_MODEL_NAME}, if available), can reason a little better, but is much slower (See Advanced settings tab).\n\nBy default '[{DEFAULT_DATA_SOURCE_NAME}]({DEFAULT_DATA_SOURCE})' is loaded.If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.""")
+    gr.Markdown(f"""Chat with PDFs, web pages or data files (.csv / .xlsx). The default is a small model ({SMALL_MODEL_NAME}), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. Go to Advanced settings to change model to e.g. a choice of Gemini models that are available on [their very generous free tier](https://ai.google.dev/gemini-api/docs/pricing) (needs an API key), or AWS Bedrock/larger local models if activated.\n\nBy default '[{DEFAULT_DATA_SOURCE_NAME}]({DEFAULT_DATA_SOURCE})' is loaded as a data source. If you want to query another data source, please upload it on the 'Change data source' tab. If switching topic, please click the 'Clear chat' button. 'Stop generating' will halt the language model during its response.\n\n**Caution: On Hugging Face, this is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it!** Also, please note that AI chatbots may give incomplete or incorrect information, so please use with care and ensure that you verify any outputs before further use.""")
     
     with gr.Row():
         current_source = gr.Textbox(label="Current data source(s)", value=DEFAULT_DATA_SOURCE, scale = 10)
@@ -252,7 +252,7 @@ with app:
         
         current_topic = gr.Textbox(label="Feature currently disabled - Keywords related to current conversation topic.", placeholder="Keywords related to the conversation topic will appear here", visible=False)
 
-    with gr.Tab("Load in a different file/webpage"):
+    with gr.Tab("Change data source"):
         with gr.Accordion("PDF file", open = False):
             in_pdf = gr.File(label="Upload pdf", file_count="multiple", file_types=['.pdf'])
             load_pdf = gr.Button(value="Load in file", variant="secondary", scale=0)
