@@ -1,9 +1,7 @@
 from typing import Type, List
 import pandas as pd
 import boto3
-import tempfile
 import os
-from chatfuncs.helper_functions import get_or_create_env_var
 from chatfuncs.config import AWS_REGION, RUN_AWS_FUNCTIONS, QA_CHATBOT_BUCKET
 
 PandasDataFrame = Type[pd.DataFrame]
@@ -17,7 +15,7 @@ if RUN_AWS_FUNCTIONS == "1":
         bucket_name = os.environ['']
         session = boto3.Session() # profile_name="default"
     except Exception as e:
-        print(e)
+        print("Failed to start boto3 session due to:", e)
 
     def get_assumed_role_info():
         sts_endpoint = 'https://sts.' + AWS_REGION + '.amazonaws.com'

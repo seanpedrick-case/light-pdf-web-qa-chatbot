@@ -4,7 +4,7 @@ from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 import gradio as gr
 import pandas as pd
-from torch import float16
+from torch import float16, float32
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM,  AutoModelForCausalLM
@@ -15,7 +15,7 @@ from chatfuncs.ingest import embed_faiss_save_to_zip
 from chatfuncs.helper_functions import get_connection_params, reveal_feedback_buttons, wipe_logs
 from chatfuncs.aws_functions import upload_file_to_s3
 from chatfuncs.auth import authenticate_user
-from chatfuncs.config import FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, HOST_NAME, COGNITO_AUTH, INPUT_FOLDER, OUTPUT_FOLDER, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, DEFAULT_EMBEDDINGS_LOCATION, EMBEDDINGS_MODEL_NAME, DEFAULT_DATA_SOURCE, HF_TOKEN, LARGE_MODEL_REPO_ID, LARGE_MODEL_GGUF_FILE, LARGE_MODEL_NAME, SMALL_MODEL_NAME, SMALL_MODEL_REPO_ID, DEFAULT_DATA_SOURCE_NAME, DEFAULT_EXAMPLES, DEFAULT_MODEL_CHOICES
+from chatfuncs.config import FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, HOST_NAME, COGNITO_AUTH, INPUT_FOLDER, OUTPUT_FOLDER, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, DEFAULT_EMBEDDINGS_LOCATION, EMBEDDINGS_MODEL_NAME, DEFAULT_DATA_SOURCE, HF_TOKEN, LARGE_MODEL_REPO_ID, LARGE_MODEL_GGUF_FILE, LARGE_MODEL_NAME, SMALL_MODEL_NAME, SMALL_MODEL_REPO_ID, DEFAULT_DATA_SOURCE_NAME, DEFAULT_EXAMPLES, DEFAULT_MODEL_CHOICES, RUN_GEMINI_MODELS, LOAD_LARGE_MODEL
 from chatfuncs.model_load import torch_device, gpu_config, cpu_config, context_length
 import chatfuncs.chatfuncs as chatf
 import chatfuncs.ingest as ing
@@ -94,17 +94,17 @@ def create_hf_model(model_name:str, hf_token=HF_TOKEN):
             model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")#, torch_dtype=torch.float16)
         else:
             if hf_token:
-                model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", token=hf_token) # , torch_dtype=float16
+                model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", token=hf_token, torch_dtype=float32) # , torch_dtype=float16 - not compatible with CPU and Gemma 3
             else:
-                model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto") # , torch_dtype=float16
+                model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", torch_dtype=float32) # , torch_dtype=float16
     else:
         if "flan" in model_name:
             model = AutoModelForSeq2SeqLM.from_pretrained(model_name)#, torch_dtype=torch.float16)
         else:
             if hf_token:
-                model = AutoModelForCausalLM.from_pretrained(model_name, token=hf_token) # , torch_dtype=float16
+                model = AutoModelForCausalLM.from_pretrained(model_name, token=hf_token, torch_dtype=float32) # , torch_dtype=float16
             else:
-                model = AutoModelForCausalLM.from_pretrained(model_name) # , torch_dtype=float16
+                model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=float32) # , torch_dtype=float16
 
     if hf_token:
         tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = context_length, token=hf_token)
@@ -212,6 +212,7 @@ with app:
 
     session_hash_textbox = gr.Textbox(value="", visible=False)
     s3_logs_output_textbox = gr.Textbox(label="S3 logs", visible=False)
+    latest_user_rating_data_path = gr.Textbox(label="output_ratings_textbox", visible=False)
 
     access_logs_state = gr.State(access_logs_data_folder + 'dataset1.csv')
     access_s3_logs_loc_state = gr.State(access_logs_data_folder)
@@ -222,9 +223,8 @@ with app:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")        
     
-    gr.Markdown(f"""Chat with PDF, web page or (new) csv/Excel documents. The default is a small model ({SMALL_MODEL_NAME}), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative ({LARGE_MODEL_NAME}), can reason a little better, but is much slower (See Advanced settings tab).\n\nBy default '[{DEFAULT_DATA_SOURCE_NAME}]({DEFAULT_DATA_SOURCE})' is loaded.If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.""")
-        
-
+    gr.Markdown(f"""Chat with PDF, web page or (new) csv/Excel documents. The default is a small model ({SMALL_MODEL_NAME}), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. The alternative ({LARGE_MODEL_NAME}, if available), can reason a little better, but is much slower (See Advanced settings tab).\n\nBy default '[{DEFAULT_DATA_SOURCE_NAME}]({DEFAULT_DATA_SOURCE})' is loaded.If you want to talk about another document or web page, please select from the second tab. If switching topic, please click the 'Clear chat' button.\n\nCaution: This is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it! Also, please note that LLM chatbots may give incomplete or incorrect information, so please use with care.""")
+    
     with gr.Row():
         current_source = gr.Textbox(label="Current data source(s)", value=DEFAULT_DATA_SOURCE, scale = 10)
         current_model = gr.Textbox(label="Current model", value=model_type, scale = 3)
@@ -233,10 +233,11 @@ with app:
 
         with gr.Row():
             #chat_height = 500
-            chatbot = gr.Chatbot(value=None, avatar_images=('user.jfif', 'bot.jpg'), scale = 1, resizable=True, show_copy_all_button=True, show_copy_button=True, show_share_button=True, type='messages') # , height=chat_height
-            with gr.Accordion("Open this tab to see the source paragraphs used to generate the answer", open = True):
-                sources = gr.HTML(value = "Source paragraphs with the most relevant text will appear here") # , height=chat_height
+            chatbot = gr.Chatbot(value=None, avatar_images=('user.jfif', 'bot.jpg'), scale = 1, resizable=True, show_copy_all_button=True, show_copy_button=True, show_share_button=None, type='messages', max_height=500)
+            with gr.Accordion("Source paragraphs with the most relevant text will appear here", open = True):
+                sources = gr.HTML(value = "No relevant source paragraphs currently loaded", max_height=500) # , height=chat_height
 
+        gr.Markdown("Make sure that your questions are as specific as possible to allow the search engine to find the most relevant text to your query.")
         with gr.Row():
             message = gr.Textbox(
                 label="Enter your question here",
@@ -247,12 +248,11 @@ with app:
             clear = gr.Button(value="Clear chat", variant="secondary", scale=1) 
             stop = gr.Button(value="Stop generating", variant="stop", scale=1)
 
-        examples_set = gr.Radio(label="Example questions",
-            choices=default_examples_set)
+        examples_set = gr.Radio(label="Example questions", choices=default_examples_set)
         
         current_topic = gr.Textbox(label="Feature currently disabled - Keywords related to current conversation topic.", placeholder="Keywords related to the conversation topic will appear here", visible=False)
 
-    with gr.Tab("Load in a different file to chat with"):
+    with gr.Tab("Load in a different file/webpage"):
         with gr.Accordion("PDF file", open = False):
             in_pdf = gr.File(label="Upload pdf", file_count="multiple", file_types=['.pdf'])
             load_pdf = gr.Button(value="Load in file", variant="secondary", scale=0)
@@ -272,15 +272,25 @@ with app:
             ingest_embed_out = gr.Textbox(label="File/web page preparation progress")
             file_out_box = gr.File(file_count='single', file_types=['.zip'])
 
-    with gr.Tab("Advanced features"):
+    with gr.Tab("Advanced settings - change model/model options"):
         out_passages = gr.Slider(minimum=1, value = 2, maximum=10, step=1, label="Choose number of passages to retrieve from the document. Numbers greater than 2 may lead to increased hallucinations or input text being truncated.")
         temp_slide = gr.Slider(minimum=0.1, value = 0.5, maximum=1, step=0.1, label="Choose temperature setting for response generation.")
         with gr.Row():
-            model_choice = gr.Radio(label="Choose a chat model", value=SMALL_MODEL_NAME, choices = default_model_choices)
-            in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password",interactive=True, visible=True)
-            change_model_button = gr.Button(value="Load model", scale=0)
-        with gr.Accordion("Choose number of model layers to send to GPU (WARNING: please don't modify unless you are sure you have a GPU).", open = False):
-            gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU.", value=0, minimum=0, maximum=100, step = 1, visible=True)
+            with gr.Column(scale=3):
+                model_choice = gr.Radio(label="Choose a chat model", value=SMALL_MODEL_NAME, choices = default_model_choices)
+                if RUN_GEMINI_MODELS == "1":
+                    in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password",interactive=True, visible=True)
+                else:
+                    in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password",interactive=True, visible=False)
+            with gr.Column(scale=1):
+                change_model_button = gr.Button(value="Load model")
+
+        if LOAD_LARGE_MODEL == "1":
+            with gr.Accordion("Choose number of model layers to send to GPU (WARNING: please don't modify unless you are sure you have a GPU).", open = False, visible=True):
+                gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU.", value=0, minimum=0, maximum=100, step = 1, visible=True)
+        else:
+            with gr.Accordion("Choose number of model layers to send to GPU (WARNING: please don't modify unless you are sure you have a GPU).", open = False, visible=False):
+                gpu_layer_choice = gr.Slider(label="Choose number of model layers to send to GPU.", value=0, minimum=0, maximum=100, step = 1, visible=False)
             
         load_text = gr.Text(label="Load status")        
 
@@ -318,7 +328,8 @@ with app:
     clear.click(lambda: None, None, chatbot, queue=False)
 
     # Thumbs up or thumbs down voting function
-    chatbot.like(chatf.vote, [chat_history_state, instruction_prompt_out, model_type_state], None)
+    chatbot.like(chatf.vote, [chat_history_state, instruction_prompt_out, model_type_state], [latest_user_rating_data_path]).\
+    success(fn = upload_file_to_s3, inputs=[latest_user_rating_data_path, latest_user_rating_data_path], outputs=[s3_logs_output_textbox])
     
 
     ###

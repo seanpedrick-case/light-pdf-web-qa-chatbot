@@ -34,7 +34,7 @@ from langchain.docstore.document import Document
 
 from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen, instruction_prompt_template_orca, instruction_prompt_gemma
 from chatfuncs.model_load import temperature, max_new_tokens, sample, repetition_penalty, top_p, top_k, torch_device, CtransGenGenerationConfig, max_tokens
-from chatfuncs.config import GEMINI_API_KEY, AWS_DEFAULT_REGION, LARGE_MODEL_NAME, SMALL_MODEL_NAME, RUN_AWS_FUNCTIONS
+from chatfuncs.config import GEMINI_API_KEY, AWS_DEFAULT_REGION, LARGE_MODEL_NAME, SMALL_MODEL_NAME, RUN_AWS_FUNCTIONS, FEEDBACK_LOGS_FOLDER
 
 model_object = [] # Define empty list for model functions to run
 tokenizer = [] # Define empty list for model functions to run
@@ -1187,35 +1187,41 @@ def hide_block():
     
 # Vote function
 
-def vote(data: gr.LikeData, chat_history, instruction_prompt_out, model_type):
-    import os
-    import pandas as pd
+def vote(data: gr.LikeData, chat_history:list[dict], instruction_prompt_out:str, model_type:str, feedback_folder:str=FEEDBACK_LOGS_FOLDER):
 
-    chat_history_last = str(str(chat_history[-1][0]) + " - " + str(chat_history[-1][1]))
+    query_text = next(
+    (entry['content'] for entry in reversed(chat_history) if entry.get('role') == 'user'),
+    "")
+
+    response_text = next(
+    (entry['content'] for entry in reversed(chat_history) if entry.get('role') == 'assistant'),
+    "")
+
+    chat_history_latest = str(query_text + " - " + response_text)
+
+    if isinstance(data.value, list): chosen_response = data.value[-1]
+    else: chosen_response = data.value
 
     response_df = pd.DataFrame(data={"thumbs_up":data.liked,
-                                        "chosen_response":data.value,
+                                        "chosen_response":chosen_response,
                                           "input_prompt":instruction_prompt_out,
-                                          "chat_history":chat_history_last,
+                                          "chat_history":chat_history_latest,
                                           "model_type": model_type,
                                           "date_time": pd.Timestamp.now()}, index=[0])
 
     if data.liked:
-        print("You upvoted this response: " + data.value)
-        
-        if os.path.isfile("thumbs_up_data.csv"):
-             existing_thumbs_up_df = pd.read_csv("thumbs_up_data.csv")
-             thumbs_up_df_concat = pd.concat([existing_thumbs_up_df, response_df], ignore_index=True).drop("Unnamed: 0",axis=1, errors="ignore")
-             thumbs_up_df_concat.to_csv("thumbs_up_data.csv")
-        else:
-            response_df.to_csv("thumbs_up_data.csv")
+        print("You upvoted this response:", chosen_response)   
 
     else:
-        print("You downvoted this response: " + data.value)
+        print("You downvoted this response:", chosen_response)
+        
+    output_data_path = feedback_folder + "thumbs_up_down_data.csv"
 
-        if os.path.isfile("thumbs_down_data.csv"):
-             existing_thumbs_down_df = pd.read_csv("thumbs_down_data.csv")
-             thumbs_down_df_concat = pd.concat([existing_thumbs_down_df, response_df], ignore_index=True).drop("Unnamed: 0",axis=1, errors="ignore")
-             thumbs_down_df_concat.to_csv("thumbs_down_data.csv")
-        else:
-            response_df.to_csv("thumbs_down_data.csv")            
+    if os.path.isfile(output_data_path):
+            existing_thumbs_down_df = pd.read_csv(output_data_path)
+            thumbs_down_df_concat = pd.concat([existing_thumbs_down_df, response_df], ignore_index=True).drop("Unnamed: 0",axis=1, errors="ignore")
+            thumbs_down_df_concat.to_csv(output_data_path)
+    else:
+        response_df.to_csv(output_data_path)
+
+    return output_data_path        
