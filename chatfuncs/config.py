@@ -107,7 +107,7 @@ if AWS_ACCESS_KEY: print(f'AWS_ACCESS_KEY found in environment variables')
 AWS_SECRET_KEY = get_or_create_env_var('AWS_SECRET_KEY', '')
 if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
 
-DOCUMENT_REDACTION_BUCKET = get_or_create_env_var('DOCUMENT_REDACTION_BUCKET', '')
+QA_CHATBOT_BUCKET = get_or_create_env_var('QA_CHATBOT_BUCKET', '')
 
 # Custom headers e.g. if routing traffic through Cloudfront
 # Retrieving or setting CUSTOM_HEADER
