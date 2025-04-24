@@ -17,15 +17,15 @@ temperature: float = 0.1
 top_k: int = 3
 top_p: float = 1
 repetition_penalty: float = 1.15
-flan_alpaca_repetition_penalty: float = 1.3
+#flan_alpaca_repetition_penalty: float = 1.3
 last_n_tokens: int = 64
 max_new_tokens: int = 1024
 seed: int = 42
 reset: bool = False
 stream: bool = True
 threads: int = threads
-batch_size:int = 256
-context_length:int = 2048
+batch_size:int = 128
+context_length:int = 4096
 sample = True
 
 # Bedrock parameters
