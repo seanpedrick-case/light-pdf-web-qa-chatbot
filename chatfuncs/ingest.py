@@ -7,7 +7,7 @@ import requests
 import pandas as pd
 import dateutil.parser
 from typing import Type, List
-#import shutil
+import shutil
 
 #from langchain_community.embeddings import HuggingFaceEmbeddings # HuggingFaceInstructEmbeddings, 
 from langchain_community.vectorstores.faiss import FAISS
