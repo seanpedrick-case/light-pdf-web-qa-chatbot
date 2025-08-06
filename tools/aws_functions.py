@@ -2,7 +2,7 @@ from typing import Type, List
 import pandas as pd
 import boto3
 import os
-from chatfuncs.config import AWS_REGION, RUN_AWS_FUNCTIONS, QA_CHATBOT_BUCKET
+from tools.config import AWS_REGION, RUN_AWS_FUNCTIONS, QA_CHATBOT_BUCKET
 
 PandasDataFrame = Type[pd.DataFrame]
 

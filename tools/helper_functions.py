@@ -3,7 +3,7 @@ import gradio as gr
 import pandas as pd
 import boto3
 from botocore.exceptions import ClientError
-from chatfuncs.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID
+from tools.config import CUSTOM_HEADER_VALUE, CUSTOM_HEADER, OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, AWS_USER_POOL_ID
 
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists

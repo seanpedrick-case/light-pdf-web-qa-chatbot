@@ -200,17 +200,18 @@ if LOAD_LARGE_MODEL == "1":
     default_model_choices.append(LARGE_MODEL_NAME)
 
 if RUN_AWS_FUNCTIONS == "1":
-    default_model_choices.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"])
+    default_model_choices.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0"])
 
 if RUN_GEMINI_MODELS == "1":
-    default_model_choices.extend(["gemini-2.0-flash-001", "gemini-2.5-flash-preview-04-17", "models/gemini-2.5-pro-exp-03-25"])
+    GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+    default_model_choices.extend(GEMINI_MODELS)
 
 
 DEFAULT_MODEL_CHOICES = get_or_create_env_var("DEFAULT_MODEL_CHOICES", str(default_model_choices))
 
-EMBEDDINGS_MODEL_NAME = get_or_create_env_var('EMBEDDINGS_MODEL_NAME', "BAAI/bge-base-en-v1.5") #"mixedbread-ai/mxbai-embed-xsmall-v1"
+EMBEDDINGS_MODEL_NAME = get_or_create_env_var('EMBEDDINGS_MODEL_NAME', "mixedbread-ai/mxbai-embed-xsmall-v1") #"mixedbread-ai/mxbai-embed-xsmall-v1"
 
-DEFAULT_EMBEDDINGS_LOCATION = get_or_create_env_var('DEFAULT_EMBEDDINGS_LOCATION', "faiss_embedding")
+DEFAULT_EMBEDDINGS_LOCATION = get_or_create_env_var('DEFAULT_EMBEDDINGS_LOCATION', "faiss_embedding/faiss_embedding.zip")
 
 DEFAULT_DATA_SOURCE_NAME = get_or_create_env_var('DEFAULT_DATA_SOURCE_NAME', "Document redaction app documentation")
 

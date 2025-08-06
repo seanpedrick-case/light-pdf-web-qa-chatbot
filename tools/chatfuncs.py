@@ -14,6 +14,7 @@ from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
 from keybert import KeyBERT
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 
 # For Name Entity Recognition model
 #from span_marker import SpanMarkerModel # Not currently used
@@ -32,9 +33,9 @@ from langchain_community.retrievers import SVMRetriever
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 
-from chatfuncs.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen, instruction_prompt_template_orca, instruction_prompt_gemma, instruction_prompt_template_gemini_aws
-from chatfuncs.model_load import temperature, max_new_tokens, sample, repetition_penalty, top_p, top_k, torch_device, CtransGenGenerationConfig, max_tokens
-from chatfuncs.config import GEMINI_API_KEY, AWS_DEFAULT_REGION, LARGE_MODEL_NAME, SMALL_MODEL_NAME, RUN_AWS_FUNCTIONS, FEEDBACK_LOGS_FOLDER
+from tools.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen, instruction_prompt_template_orca, instruction_prompt_gemma, instruction_prompt_template_gemini_aws
+from tools.model_load import temperature, max_new_tokens, sample, repetition_penalty, top_p, top_k, torch_device, CtransGenGenerationConfig, max_tokens
+from tools.config import GEMINI_API_KEY, AWS_DEFAULT_REGION, LARGE_MODEL_NAME, SMALL_MODEL_NAME, RUN_AWS_FUNCTIONS, FEEDBACK_LOGS_FOLDER
 
 model_object = [] # Define empty list for model functions to run
 tokenizer = [] # Define empty list for model functions to run
@@ -75,51 +76,6 @@ ner_model = []#SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base
 # Used to pull out keywords from chat history to add to user queries behind the scenes
 kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniLM-L6-v2")
 
-# Vectorstore funcs
-
-# def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings=embeddings):
-
-#     print(f"> Total split documents: {len(docs_out)}")
-
-#     vectorstore_func = FAISS.from_documents(documents=docs_out, embedding=embeddings)
-        
-#     '''  
-#     #with open("vectorstore.pkl", "wb") as f:
-#         #pickle.dump(vectorstore, f) 
-#     ''' 
-
-#     #if Path(save_to).exists():
-#     #    vectorstore_func.save_local(folder_path=save_to)
-#     #else:
-#     #    os.mkdir(save_to)
-#     #    vectorstore_func.save_local(folder_path=save_to)
-
-#     global vectorstore
-
-#     vectorstore = vectorstore_func
-
-#     out_message = "Document processing complete"
-
-#     #print(out_message)
-#     #print(f"> Saved to: {save_to}")
-
-#     return out_message
-
-# def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings_model=embeddings_model):
-
-#     print(f"> Total split documents: {len(docs_out)}")
-
-#     print(docs_out)
-
-#     vectorstore_func = FAISS.from_documents(documents=docs_out, embedding=embeddings_model)
-
-#     vectorstore = vectorstore_func
-
-#     out_message = "Document processing complete"
-
-#     return out_message, vectorstore_func
-
-# Prompt functions
 
 def base_prompt_templates(model_type:str = SMALL_MODEL_NAME):    
   
@@ -141,7 +97,6 @@ def base_prompt_templates(model_type:str = SMALL_MODEL_NAME):
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_phi3, input_variables=['question', 'summaries'])
     else:
         INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_gemini_aws, input_variables=['question', 'summaries'])
-        
 
     return INSTRUCTION_PROMPT, CONTENT_PROMPT
 
@@ -149,14 +104,44 @@ def write_out_metadata_as_string(metadata_in:str):
     metadata_string = [f"{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}" for d in metadata_in] # ['metadata']
     return metadata_string
 
-def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt:str, content_prompt:str, extracted_memory:list, vectorstore:object, embeddings:object, relevant_flag:bool = True, out_passages:int = 2, total_output_passage_chunks_size:int=5): # , 
+def generate_expanded_prompt(
+    inputs: Dict[str, str],
+    instruction_prompt: str,
+    content_prompt: str,
+    extracted_memory: list,
+    vectorstore: object,
+    embeddings_model: object,
+    relevant_flag: bool = True,
+    out_passages: int = 2,
+    total_output_passage_chunks_size: int = 5
+):
+    """
+    Generate an expanded prompt for a language model by retrieving and formatting relevant document passages.
+
+    Args:
+        inputs (Dict[str, str]): Dictionary containing the user's question and chat history.
+        instruction_prompt (str): The instruction prompt template to use for the model.
+        content_prompt (str): The content prompt template for formatting passages.
+        extracted_memory (list): List of previous conversation memory or context.
+        vectorstore (object): The vector store object used for document retrieval.
+        embeddings_model (object): The embeddings model used for vector search.
+        relevant_flag (bool, optional): Whether to perform relevant document retrieval. Defaults to True.
+        out_passages (int, optional): Number of passages to retrieve. Defaults to 2.
+        total_output_passage_chunks_size (int, optional): Number of neighboring chunks to expand for context. Defaults to 5.
+
+    Returns:
+        tuple: (instruction_prompt_out, sources_docs_content_string, new_question_kworded)
+            instruction_prompt_out (str): The fully formatted instruction prompt for the model.
+            sources_docs_content_string (str): The formatted string of source passages and metadata for user display.
+            new_question_kworded (str): The (possibly keyword-adapted) user question.
+    """
         
     question =  inputs["question"]
     chat_history = inputs["chat_history"]
     
     if relevant_flag == True:
         new_question_kworded = adapt_q_from_chat_history(question, chat_history, extracted_memory) # new_question_keywords, 
-        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val = 25, out_passages = out_passages, vec_score_cut_off = 0.85, vec_weight = 1, bm25_weight = 1, svm_weight = 1)
+        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(new_question_kworded, vectorstore, embeddings_model, k_val = 25, out_passages = out_passages, vec_score_cut_off = 1, vec_weight = 1, bm25_weight = 1, svm_weight = 1)
     else:
         new_question_kworded = question
         doc_df = pd.DataFrame()
@@ -164,7 +149,7 @@ def generate_expanded_prompt(inputs: Dict[str, str], instruction_prompt:str, con
         docs_keep_out = []
     
     if (not docs_keep_as_doc) | (doc_df.empty):
-        sorry_prompt = """Say 'Sorry, there is no relevant information to answer this question.'"""
+        sorry_prompt = """Respond 'Sorry, there is no relevant information to answer this question.'"""
         return sorry_prompt, "No relevant sources found.", new_question_kworded
     
     # Expand the found passages to the neighbouring context
@@ -198,7 +183,7 @@ def create_full_prompt(user_input:str,
                        history:list[dict],
                        extracted_memory:str,
                        vectorstore:object,
-                       embeddings:object,
+                       embeddings_model:object,
                        model_type:str,
                        out_passages:list[str],
                        api_key:str="",
@@ -213,7 +198,7 @@ def create_full_prompt(user_input:str,
     print("\n==== date/time: " + str(datetime.datetime.now()) + " ====")
         
     history = history or []
-         
+        
     # Create instruction prompt
     instruction_prompt, content_prompt = base_prompt_templates(model_type=model_type)
 
@@ -225,7 +210,7 @@ def create_full_prompt(user_input:str,
    
     instruction_prompt_out, docs_content_string, new_question_kworded =\
                 generate_expanded_prompt({"question": user_input, "chat_history": history}, #vectorstore,
-                                    instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings, relevant_flag, out_passages)
+                                    instruction_prompt, content_prompt, extracted_memory, vectorstore, embeddings_model, relevant_flag, out_passages)
   
     history.append({"metadata":None, "options":None, "role": 'user', "content": user_input})
         
@@ -258,8 +243,6 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
             }
         ],
     }
-
-    print("prompt_config:", prompt_config)
 
     body = json.dumps(prompt_config)
 
@@ -367,8 +350,6 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
     elif "claude" in model_choice:
         try:
             print("Calling AWS Claude model")
-            print("prompt:", prompt)
-            print("system_prompt:", system_prompt)
             response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
         except Exception as e:
             # If fails, try again after x seconds in case there is a throttle limit
@@ -420,9 +401,8 @@ def process_requests(prompts: List[str], system_prompt_with_table: str, conversa
 
     response, conversation_history = send_request(prompts[0], conversation_history, model=model, config=config, model_choice=model_choice, system_prompt=system_prompt_with_table, temperature=temperature)
     
-    print(response.text)
-    #"Okay, I'm ready. What source are we discussing, and what's your question about it? Please provide as much context as possible so I can give you the best answer."]
-    print(response.usage_metadata)
+    #print(response.text)
+    #print(response.usage_metadata)
     responses.append(response)
 
     # Create conversation txt object
@@ -463,8 +443,6 @@ def produce_streaming_answer_chatbot(
     #    return history
 
     history = chat_history
-
-    print("history at start of streaming function:", history)
 
     if relevant_query_bool == False:
         history.append({"metadata":None, "options":None, "role": "assistant", "content": 'No relevant query found. Please retry your question'})
@@ -557,8 +535,6 @@ def produce_streaming_answer_chatbot(
     elif "claude" in model_type:
         system_prompt = "You are answering questions from the user based on source material. Make sure to fully answer the questions with all required detail."
 
-        print("full_prompt:", full_prompt)
-
         if isinstance(full_prompt, str):
             full_prompt = [full_prompt]
 
@@ -622,7 +598,7 @@ def produce_streaming_answer_chatbot(
             history[-1]['content'] += char
             yield history
 
-        print("history at end of function:", history)
+        #print("history at end of function:", history)
 
 # Chat helper functions
 
@@ -691,164 +667,188 @@ def create_doc_df(docs_keep_out):
 
             return doc_df
 
-def hybrid_retrieval(new_question_kworded, vectorstore, embeddings, k_val, out_passages,
-                           vec_score_cut_off, vec_weight, bm25_weight, svm_weight): # ,vectorstore, embeddings
+def hybrid_retrieval(
+    new_question_kworded: str,
+    vectorstore:FAISS,
+    embeddings_model:HuggingFaceEmbeddings,
+    k_val: int,
+    out_passages: int,
+    vec_score_cut_off: float,
+    vec_weight: float,
+    bm25_weight: float,
+    svm_weight: float
+) -> tuple:
+    """
+    Perform hybrid retrieval of relevant documents based on a query using vector similarity, BM25, and SVM weights.
 
-            #vectorstore=globals()["vectorstore"]
-            #embeddings=globals()["embeddings"]
-            doc_df = pd.DataFrame()
+    Args:
+        new_question_kworded (str): The keyword-adapted user query.
+        vectorstore: The vectorstore object for similarity search.
+        embeddings_model: The embeddings model used for vector search.
+        k_val (int): Number of top documents to retrieve.
+        out_passages (int): Number of passages to output.
+        vec_score_cut_off (float): Similarity score threshold for filtering.
+        vec_weight (float): Weight for vector similarity.
+        bm25_weight (float): Weight for BM25 retrieval.
+        svm_weight (float): Weight for SVM retrieval.
 
+    Returns:
+        tuple: (docs_keep_as_doc, doc_df, docs_keep_out)
+            docs_keep_as_doc: List of kept document objects.
+            doc_df: DataFrame of kept documents and metadata.
+            docs_keep_out: List of kept (document, score) tuples.
+    """
 
-            docs = vectorstore.similarity_search_with_score(new_question_kworded, k=k_val)
+    doc_df = pd.DataFrame()
 
-            # Keep only documents with a certain score
-            docs_len = [len(x[0].page_content) for x in docs]
-            docs_scores = [x[1] for x in docs]
+    docs = vectorstore.similarity_search_with_score(new_question_kworded, k=k_val)
 
-            # Only keep sources that are sufficiently relevant (i.e. similarity search score below threshold below)
-            score_more_limit = pd.Series(docs_scores) < vec_score_cut_off
-            docs_keep = list(compress(docs, score_more_limit))
+    # Keep only documents with a certain score
+    docs_len = [len(x[0].page_content) for x in docs]
+    docs_scores = [x[1] for x in docs]
 
-            if not docs_keep:
-                return [], pd.DataFrame(), []
+    # Only keep sources that are sufficiently relevant (i.e. similarity search score above threshold below)
+    score_more_limit = pd.Series(docs_scores) > vec_score_cut_off
+    docs_keep = list(compress(docs, score_more_limit))
 
-            # Only keep sources that are at least 100 characters long
-            length_more_limit = pd.Series(docs_len) >= 100
-            docs_keep = list(compress(docs_keep, length_more_limit))
+    if not docs_keep:
+        return [], pd.DataFrame(), []
 
-            if not docs_keep:
-                return [], pd.DataFrame(), []
+    # Only keep sources that are at least 100 characters long
+    length_more_limit = pd.Series(docs_len) >= 100
+    docs_keep = list(compress(docs_keep, length_more_limit))
 
-            docs_keep_as_doc = [x[0] for x in docs_keep]
-            docs_keep_length = len(docs_keep_as_doc)
+    if not docs_keep:
+        return [], pd.DataFrame(), []
 
-
-                
-            if docs_keep_length == 1:
-
-                content=[]
-                meta_url=[]
-                score=[]
-                
-                for item in docs_keep:
-                    content.append(item[0].page_content)
-                    meta_url.append(item[0].metadata['source'])
-                    score.append(item[1])       
-
-                # Create df from 'winning' passages
-
-                doc_df = pd.DataFrame(list(zip(content, meta_url, score)),
-                columns =['page_content', 'meta_url', 'score'])
-
-                docs_content = doc_df['page_content'].astype(str)
-                docs_url = doc_df['meta_url']
-
-                return docs_keep_as_doc, doc_df, docs_content, docs_url
-            
-            # Check for if more docs are removed than the desired output
-            if out_passages > docs_keep_length: 
-                out_passages = docs_keep_length
-                k_val = docs_keep_length
-                     
-            vec_rank = [*range(1, docs_keep_length+1)]
-            vec_score = [(docs_keep_length/x)*vec_weight for x in vec_rank]
-
-            print("Number of documents remaining: ", docs_keep_length)
-            
-            # 2nd level check using BM25s package to do keyword search on retrieved passages.
-            
-            content_keep=[]
-            for item in docs_keep:
-                content_keep.append(item[0].page_content)
-
-            # Prepare Corpus (Tokenized & Optional Stemming)
-            corpus = [doc.lower() for doc in content_keep]
-            #stemmer = SnowballStemmer("english", ignore_stopwords=True)  # NLTK stemming not compatible
-            stemmer = Stemmer.Stemmer("english")
-            corpus_tokens = bm25s.tokenize(corpus, stopwords="en", stemmer=stemmer)
-
-            # Create and Index with BM25s
-            retriever = bm25s.BM25()
-            retriever.index(corpus_tokens)
-
-            # Query Processing (Stemming applied consistently if used above)
-            query_tokens = bm25s.tokenize(new_question_kworded.lower(), stemmer=stemmer)
-            results, scores = retriever.retrieve(query_tokens, corpus=corpus, k=len(corpus)) # Retrieve all docs
-
-            for i in range(results.shape[1]):
-                doc, score = results[0, i], scores[0, i]
-                print(f"Rank {i+1} (score: {score:.2f}): {doc}")
-
-            #print("BM25 results:", results)
-            #print("BM25 scores:", scores)
-
-            # Rank Calculation (Custom Logic for Your BM25 Score)
-            bm25_rank = list(range(1, len(results[0]) + 1))
-            #bm25_rank = results[0]#.tolist()[0]  # Since you have a single query
-            bm25_score = [(docs_keep_length / (rank + 1)) * bm25_weight for rank in bm25_rank] 
-            # +1 to avoid division by 0 for rank 0
-
-            # Result Ordering (Using the calculated ranks)
-            pairs = list(zip(bm25_rank, docs_keep_as_doc))
-            pairs.sort()
-            bm25_result = [value for rank, value in pairs]
-            
-
-            # 3rd level check on retrieved docs with SVM retriever
-            # Check the type of the embeddings object
-            embeddings_type = type(embeddings)
-
-
-            #hf_embeddings = HuggingFaceEmbeddings(**embeddings)
-            hf_embeddings = embeddings
-            
-            svm_retriever = SVMRetriever.from_texts(content_keep, hf_embeddings, k = k_val)
-            svm_result = svm_retriever.invoke(new_question_kworded)
-
-         
-            svm_rank=[]
-            svm_score = []
-
-            for vec_item in docs_keep:
-                x = 0
-                for svm_item in svm_result:
-                    x = x + 1
-                    if svm_item.page_content == vec_item[0].page_content:
-                        svm_rank.append(x)
-                        svm_score.append((docs_keep_length/x)*svm_weight)
-
+    docs_keep_as_doc = [x[0] for x in docs_keep]
+    docs_keep_length = len(docs_keep_as_doc)
         
-            ## Calculate final score based on three ranking methods
-            final_score = [a  + b + c for a, b, c in zip(vec_score, bm25_score, svm_score)]
-            final_rank = [sorted(final_score, reverse=True).index(x)+1 for x in final_score]
-            # Force final_rank to increment by 1 each time
-            final_rank = list(pd.Series(final_rank).rank(method='first'))
+    if docs_keep_length == 1:
 
-            #print("final rank: " + str(final_rank))
-            #print("out_passages: " + str(out_passages))
-
-            best_rank_index_pos = []
-
-            for x in range(1,out_passages+1):
-                try:
-                    best_rank_index_pos.append(final_rank.index(x))
-                except IndexError: # catch the error
-                    pass
-
-            # Adjust best_rank_index_pos to 
-
-            best_rank_pos_series = pd.Series(best_rank_index_pos)
-
-
-            docs_keep_out = [docs_keep[i] for i in best_rank_index_pos]
+        content=[]
+        meta_url=[]
+        score=[]
         
-            # Keep only 'best' options
-            docs_keep_as_doc = [x[0] for x in docs_keep_out]
-                               
-            # Make df of best options
-            doc_df = create_doc_df(docs_keep_out)
+        for item in docs_keep:
+            content.append(item[0].page_content)
+            meta_url.append(item[0].metadata['source'])
+            score.append(item[1])       
 
-            return docs_keep_as_doc, doc_df, docs_keep_out
+        # Create df from 'winning' passages
+
+        doc_df = pd.DataFrame(list(zip(content, meta_url, score)),
+        columns =['page_content', 'meta_url', 'score'])
+
+        docs_content = doc_df['page_content'].astype(str)
+        docs_url = doc_df['meta_url']
+
+        return docs_keep_as_doc, doc_df, docs_content, docs_url
+    
+    # Check for if more docs are removed than the desired output
+    if out_passages > docs_keep_length: 
+        out_passages = docs_keep_length
+        k_val = docs_keep_length
+                
+    vec_rank = [*range(1, docs_keep_length+1)]
+    vec_score = [(docs_keep_length/x)*vec_weight for x in vec_rank]
+
+    print("Number of documents remaining: ", docs_keep_length)
+    
+    # 2nd level check using BM25s package to do keyword search on retrieved passages.
+    
+    content_keep=[]
+    for item in docs_keep:
+        content_keep.append(item[0].page_content)
+
+    # Prepare Corpus (Tokenized & Optional Stemming)
+    corpus = [doc.lower() for doc in content_keep]
+    #stemmer = SnowballStemmer("english", ignore_stopwords=True)  # NLTK stemming not compatible
+    stemmer = Stemmer.Stemmer("english")
+    corpus_tokens = bm25s.tokenize(corpus, stopwords="en", stemmer=stemmer)
+
+    # Create and Index with BM25s
+    retriever = bm25s.BM25()
+    retriever.index(corpus_tokens)
+
+    # Query Processing (Stemming applied consistently if used above)
+    query_tokens = bm25s.tokenize(new_question_kworded.lower(), stemmer=stemmer)
+    results, scores = retriever.retrieve(query_tokens, corpus=corpus, k=len(corpus)) # Retrieve all docs
+
+    for i in range(results.shape[1]):
+        doc, score = results[0, i], scores[0, i]
+        print(f"Rank {i+1} (score: {score:.2f}): {doc}")
+
+    #print("BM25 results:", results)
+    #print("BM25 scores:", scores)
+
+    # Rank Calculation (Custom Logic for Your BM25 Score)
+    bm25_rank = list(range(1, len(results[0]) + 1))
+    #bm25_rank = results[0]#.tolist()[0]  # Since you have a single query
+    bm25_score = [(docs_keep_length / (rank + 1)) * bm25_weight for rank in bm25_rank] 
+    # +1 to avoid division by 0 for rank 0
+
+    # Result Ordering (Using the calculated ranks)
+    pairs = list(zip(bm25_rank, docs_keep_as_doc))
+    pairs.sort()
+    bm25_result = [value for rank, value in pairs]
+    
+
+    # 3rd level check on retrieved docs with SVM retriever
+    # Check the type of the embeddings_model object
+    embeddings_type = type(embeddings_model)
+
+
+    #hf_embeddings = HuggingFaceEmbeddings(**embeddings)
+    hf_embeddings = embeddings_model
+    
+    svm_retriever = SVMRetriever.from_texts(content_keep, hf_embeddings, k = k_val)
+    svm_result = svm_retriever.invoke(new_question_kworded)
+
+    
+    svm_rank=[]
+    svm_score = []
+
+    for vec_item in docs_keep:
+        x = 0
+        for svm_item in svm_result:
+            x = x + 1
+            if svm_item.page_content == vec_item[0].page_content:
+                svm_rank.append(x)
+                svm_score.append((docs_keep_length/x)*svm_weight)
+
+
+    ## Calculate final score based on three ranking methods
+    final_score = [a  + b + c for a, b, c in zip(vec_score, bm25_score, svm_score)]
+    final_rank = [sorted(final_score, reverse=True).index(x)+1 for x in final_score]
+    # Force final_rank to increment by 1 each time
+    final_rank = list(pd.Series(final_rank).rank(method='first'))
+
+    #print("final rank: " + str(final_rank))
+    #print("out_passages: " + str(out_passages))
+
+    best_rank_index_pos = []
+
+    for x in range(1,out_passages+1):
+        try:
+            best_rank_index_pos.append(final_rank.index(x))
+        except IndexError: # catch the error
+            pass
+
+    # Adjust best_rank_index_pos to 
+
+    best_rank_pos_series = pd.Series(best_rank_index_pos)
+
+
+    docs_keep_out = [docs_keep[i] for i in best_rank_index_pos]
+
+    # Keep only 'best' options
+    docs_keep_as_doc = [x[0] for x in docs_keep_out]
+                        
+    # Make df of best options
+    doc_df = create_doc_df(docs_keep_out)
+
+    return docs_keep_as_doc, doc_df, docs_keep_out
 
 def get_expanded_passages(vectorstore, docs, width):
 

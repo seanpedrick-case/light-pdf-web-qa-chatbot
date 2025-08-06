@@ -12,8 +12,9 @@ from gradio import Progress
 from typing import List, Tuple
 from io import StringIO
 
-from chatfuncs.prompts import prompt1, prompt2, prompt3, system_prompt, summarise_system_prompt, summarise_prompt
-from chatfuncs.helper_functions import output_folder, detect_file_type, get_file_path_end, read_file, get_or_create_env_var
+from tools.prompts import prompt1, prompt2, prompt3, system_prompt, summarise_system_prompt, summarise_prompt
+from tools.helper_functions import output_folder, detect_file_type, get_file_path_end, read_file, get_or_create_env_var
+from tools.config import GEMINI_MODELS
 
 # ResponseObject class for AWS Bedrock calls
 class ResponseObject:
@@ -171,33 +172,6 @@ def construct_gemini_generative_model(in_api_key: str, temperature: float, model
     #model = ai.GenerativeModel.from_cached_content(cached_content=cache, generation_config=config)
     model = ai.GenerativeModel(model_name='models/' + model_choice, system_instruction=system_prompt, generation_config=config)
     
-    # Upload CSV file (replace with your actual file path)
-    #file_id = ai.upload_file(upload_file_path)
-
-    
-    # if file_type == 'xlsx':
-    #     print("Running through all xlsx sheets")
-    #     #anon_xlsx = pd.ExcelFile(upload_file_path)
-    #     if not in_excel_sheets:
-    #         out_message.append("No Excel sheets selected. Please select at least one to anonymise.")
-    #         continue
-
-    #     anon_xlsx = pd.ExcelFile(upload_file_path)                
-
-    #     # Create xlsx file:
-    #     anon_xlsx_export_file_name = output_folder + out_file_part + "_redacted.xlsx"
-
-
-    ### QUERYING LARGE LANGUAGE MODEL ###
-    # Prompt caching the table and system prompt. See here: https://ai.google.dev/gemini-api/docs/caching?lang=python
-    # Create a cache with a 5 minute TTL. ONLY FOR CACHES OF AT LEAST 32k TOKENS!
-    # cache = ai.caching.CachedContent.create(
-    # model='models/' + model_choice,
-    # display_name=out_file_part, # used to identify the cache
-    # system_instruction=system_prompt_with_table,
-    # ttl=datetime.timedelta(minutes=5),
-    # )
-
     return model, config
 
 def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice: str) -> ResponseObject:
@@ -276,7 +250,7 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
     #print("full_prompt:", full_prompt)
 
     # Generate the model's response
-    if model_choice in ["gemini-1.5-flash-002", "gemini-1.5-pro-002"]:
+    if model_choice in GEMINI_MODELS:
         try:
             response = model.generate_content(contents=full_prompt, generation_config=config)
         except Exception as e:
@@ -701,7 +675,7 @@ def llm_query(file_data:pd.DataFrame, existing_topics_w_references_table:pd.Data
         #print("normalised_simple_markdown_table:", normalised_simple_markdown_table)
 
         # Prepare Gemini models before query       
-        if model_choice in ["gemini-1.5-flash-002", "gemini-1.5-pro-002"]:
+        if model_choice in GEMINI_MODELS:
             print("Using Gemini model:", model_choice)
             model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=summarise_system_prompt, max_tokens=max_tokens)
         else:
@@ -772,16 +746,11 @@ def llm_query(file_data:pd.DataFrame, existing_topics_w_references_table:pd.Data
 
         summary_prompt_list = [formatted_summary_prompt]
 
-        print("master_summary_prompt_list:", summary_prompt_list[0])
-
         summary_conversation_history = []
         summary_whole_conversation = []
 
         # Process requests to large language model
         master_summary_response, summary_conversation_history, whole_summary_conversation, whole_conversation_metadata = process_requests(summary_prompt_list, summarise_system_prompt, summary_conversation_history, summary_whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, master = True)
-
-        print("master_summary_response:", master_summary_response[-1].text)
-        print("Whole conversation metadata:", whole_conversation_metadata)
 
         new_topic_table_out_path, new_reference_table_out_path, new_unique_topics_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_unique_topics_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(master_summary_response, whole_summary_conversation, whole_conversation_metadata, out_file_part, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, first_run=False)
 
@@ -832,7 +801,7 @@ def llm_query(file_data:pd.DataFrame, existing_topics_w_references_table:pd.Data
         #system_prompt_with_table = system_prompt + normalised_simple_markdown_table
 
         # Prepare Gemini models before query       
-        if model_choice in ["gemini-1.5-flash-002", "gemini-1.5-pro-002"]:
+        if model_choice in GEMINI_MODELS:
             print("Using Gemini model:", model_choice)
             model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
         else:
@@ -857,9 +826,6 @@ def llm_query(file_data:pd.DataFrame, existing_topics_w_references_table:pd.Data
         
         #print("Whole conversation metadata before:", whole_conversation_metadata)
 
-        print("responses:", responses[-1].text)
-        print("Whole conversation metadata:", whole_conversation_metadata)
-
         topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_table_df, markdown_table, reference_df, new_unique_topics_df, batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, out_file_part, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, first_run=True)
 
         # If error in table parsing, leave function
@@ -878,8 +844,6 @@ def llm_query(file_data:pd.DataFrame, existing_topics_w_references_table:pd.Data
         ## Unique topic list
 
         new_unique_topics_df = pd.concat([new_unique_topics_df, existing_unique_topics_df]).drop_duplicates('Subtopic')
-
-        print("new_unique_topics_df:", new_unique_topics_df)
 
         new_unique_topics_df.to_csv(unique_topics_df_out_path, index=None)
         out_file_paths.append(unique_topics_df_out_path)
