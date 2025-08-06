@@ -16,8 +16,8 @@
 # +
 import pytest
 import gradio as gr
-from ..chatfuncs.ingest import *
-from ..chatfuncs.chatfuncs import *
+from ..tools.ingest import *
+from ..tools.chatfuncs import *
 
 def test_read_docx():
     content = read_docx('sample.docx')

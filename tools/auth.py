@@ -4,7 +4,7 @@ import boto3
 import hmac
 import hashlib
 import base64
-from chatfuncs.config import AWS_CLIENT_ID, AWS_CLIENT_SECRET, AWS_USER_POOL_ID, AWS_REGION
+from tools.config import AWS_CLIENT_ID, AWS_CLIENT_SECRET, AWS_USER_POOL_ID, AWS_REGION
 
 def calculate_secret_hash(client_id:str, client_secret:str, username:str):
     message = username + client_id

@@ -1,6 +1,6 @@
 import os
 from typing import Type
-from langchain_huggingface.embeddings import HuggingFaceEmbeddings
+#from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 import gradio as gr
 import pandas as pd
@@ -8,17 +8,15 @@ from torch import float16, float32
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM,  AutoModelForCausalLM
-import zipfile
 
-from chatfuncs.ingest import embed_faiss_save_to_zip
-
-from chatfuncs.helper_functions import get_connection_params, reveal_feedback_buttons, wipe_logs
-from chatfuncs.aws_functions import upload_file_to_s3
-from chatfuncs.auth import authenticate_user
-from chatfuncs.config import FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, HOST_NAME, COGNITO_AUTH, INPUT_FOLDER, OUTPUT_FOLDER, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, DEFAULT_EMBEDDINGS_LOCATION, EMBEDDINGS_MODEL_NAME, DEFAULT_DATA_SOURCE, HF_TOKEN, LARGE_MODEL_REPO_ID, LARGE_MODEL_GGUF_FILE, LARGE_MODEL_NAME, SMALL_MODEL_NAME, SMALL_MODEL_REPO_ID, DEFAULT_DATA_SOURCE_NAME, DEFAULT_EXAMPLES, DEFAULT_MODEL_CHOICES, RUN_GEMINI_MODELS, LOAD_LARGE_MODEL
-from chatfuncs.model_load import torch_device, gpu_config, cpu_config, context_length
-import chatfuncs.chatfuncs as chatf
-import chatfuncs.ingest as ing
+from tools.ingest import embed_faiss_save_to_zip, load_embeddings_model, get_faiss_store
+from tools.helper_functions import get_connection_params, reveal_feedback_buttons, wipe_logs
+from tools.aws_functions import upload_file_to_s3
+from tools.auth import authenticate_user
+from tools.config import FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, HOST_NAME, COGNITO_AUTH, INPUT_FOLDER, OUTPUT_FOLDER, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, DEFAULT_EMBEDDINGS_LOCATION, EMBEDDINGS_MODEL_NAME, DEFAULT_DATA_SOURCE, HF_TOKEN, LARGE_MODEL_REPO_ID, LARGE_MODEL_GGUF_FILE, LARGE_MODEL_NAME, SMALL_MODEL_NAME, SMALL_MODEL_REPO_ID, DEFAULT_DATA_SOURCE_NAME, DEFAULT_EXAMPLES, DEFAULT_MODEL_CHOICES, RUN_GEMINI_MODELS, LOAD_LARGE_MODEL
+from tools.model_load import torch_device, gpu_config, cpu_config, context_length
+import tools.chatfuncs as chatf
+import tools.ingest as ing
 
 PandasDataFrame = Type[pd.DataFrame]
 
@@ -34,41 +32,14 @@ if isinstance(DEFAULT_EXAMPLES, str): default_examples_set = eval(DEFAULT_EXAMPL
 if isinstance(DEFAULT_MODEL_CHOICES, str): default_model_choices = eval(DEFAULT_MODEL_CHOICES)
 
 # Disable cuda devices if necessary
-#os.environ['CUDA_VISIBLE_DEVICES'] = '-1' 
-
+#os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 ###
 # Load preset embeddings, vectorstore, and model
 ###
-
-def load_embeddings_model(embeddings_model = EMBEDDINGS_MODEL_NAME):
-
-    embeddings_func = HuggingFaceEmbeddings(model_name=embeddings_model)
-
-    #global embeddings
-
-    #embeddings = embeddings_func
-
-    return embeddings_func
-
-def get_faiss_store(faiss_vstore_folder:str, embeddings_model:object):
-
-    with zipfile.ZipFile(faiss_vstore_folder + '/' + faiss_vstore_folder + '.zip', 'r') as zip_ref:
-        zip_ref.extractall(faiss_vstore_folder)
-
-    faiss_vstore = FAISS.load_local(folder_path=faiss_vstore_folder, embeddings=embeddings_model, allow_dangerous_deserialization=True)
-    os.remove(faiss_vstore_folder + "/index.faiss")
-    os.remove(faiss_vstore_folder + "/index.pkl")
-    
-    #global vectorstore
-
-    #vectorstore = faiss_vstore
-
-    return faiss_vstore #vectorstore
-
 # Load in default embeddings and embeddings model name
 embeddings_model = load_embeddings_model(EMBEDDINGS_MODEL_NAME)
-vectorstore = get_faiss_store(faiss_vstore_folder=DEFAULT_EMBEDDINGS_LOCATION,embeddings_model=embeddings_model)#globals()["embeddings"])
+vectorstore = get_faiss_store(zip_file_path=DEFAULT_EMBEDDINGS_LOCATION,embeddings_model=embeddings_model)#globals()["embeddings"])
 
 chatf.embeddings = embeddings_model
 chatf.vectorstore = vectorstore
@@ -87,7 +58,6 @@ def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings_model=embeddings_mod
 
     return out_message, vectorstore_func
  
-
 def create_hf_model(model_name:str, hf_token=HF_TOKEN):
     if torch_device == "cuda":
         if "flan" in model_name:
@@ -167,12 +137,11 @@ def load_model(model_type:str, gpu_layers:int, gpu_config:dict=gpu_config, cpu_c
 
     return model_type, load_confirmation, model_type#model, tokenizer, model_type
 
-
 ###
 # RUN UI
 ###
 
-app = gr.Blocks(theme = gr.themes.Base(), fill_width=True)#css=".gradio-container {background-color: black}")
+app = gr.Blocks(theme = gr.themes.Default(primary_hue="blue"), fill_width=True)#css=".gradio-container {background-color: black}")
 
 with app:
     model_type = SMALL_MODEL_NAME

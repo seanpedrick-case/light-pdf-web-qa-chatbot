@@ -6,19 +6,31 @@ import re
 import requests
 import pandas as pd
 import dateutil.parser
-from typing import Type, List
+from typing import Type, List, Tuple
 import shutil
+import numpy as np
+import gradio as gr
+import zipfile
+import tempfile
+from pathlib import Path
 
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 #from langchain_community.embeddings import HuggingFaceEmbeddings # HuggingFaceInstructEmbeddings, 
 from langchain_community.vectorstores.faiss import FAISS
 #from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 #from chatfuncs.config import EMBEDDINGS_MODEL_NAME
-
+from langchain_core.embeddings import Embeddings # Import Embeddings for type hinting
+from tqdm import tqdm
+from langchain_community.docstore.in_memory import InMemoryDocstore # To manually build the docstore
+from uuid import uuid4 # To generate unique IDs for documents in the docstore
 from bs4 import BeautifulSoup
 from docx import Document as Doc
 from pypdf import PdfReader
+import faiss # For directly creating the FAISS index
+
+from tools.config import EMBEDDINGS_MODEL_NAME
 
 PandasDataFrame = Type[pd.DataFrame]
 
@@ -558,22 +570,130 @@ def docs_elements_from_csv_save(docs_path="documents.csv"):
 
 # ## Create embeddings and save faiss vector store to the path specified in `save_to`
 
-# def load_embeddings_model(embeddings_model = EMBEDDINGS_MODEL_NAME):
+def load_embeddings_model(embeddings_model = EMBEDDINGS_MODEL_NAME):
 
-#     embeddings_func = HuggingFaceEmbeddings(model_name=embeddings_model)
+    embeddings_func = HuggingFaceEmbeddings(model_name=embeddings_model)
 
-#     #global embeddings
+    #global embeddings
 
-#     #embeddings = embeddings_func
+    #embeddings = embeddings_func
 
-#     return embeddings_func
+    return embeddings_func
 
-def embed_faiss_save_to_zip(docs_out, save_folder, embeddings_model_object, save_to="faiss_embeddings", model_name="BAAI/bge-base-en-v1.5"):
-    #load_embeddings(model_name=model_name)
+# def embed_faiss_save_to_zip(docs_out, save_folder, embeddings_model_object, save_to="faiss_embeddings", model_name="mixedbread-ai/mxbai-embed-xsmall-v1"):
+
+#     print(f"> Total split documents: {len(docs_out)}")
+
+#     vectorstore = FAISS.from_documents(documents=docs_out, embedding=embeddings_model_object)
+
+#     save_to_path = Path(save_folder, save_to)
+#     save_to_path.mkdir(parents=True, exist_ok=True)
+
+#     vectorstore.save_local(folder_path=str(save_to_path))
+
+#     print("> FAISS index saved")
+#     print(f"> Saved to: {save_to}")
+
+#     # Ensure files are written before archiving
+#     index_faiss = save_to_path / "index.faiss"
+#     index_pkl = save_to_path / "index.pkl"
+
+#     if not index_faiss.exists() or not index_pkl.exists():
+#         raise FileNotFoundError("Expected FAISS index files not found before zipping.")
+
+#     # Flush file system writes by forcing a sync (works best on Unix)
+#     try:
+#         os.sync()
+#     except AttributeError:
+#         pass  # os.sync() not available on Windows
+
+#     # Create ZIP archive
+#     final_zip_path = shutil.make_archive(str(save_to_path), 'zip', root_dir=str(save_to_path))
+
+#     # Remove individual index files to avoid leaking large raw files
+#     index_faiss.unlink(missing_ok=True)
+#     index_pkl.unlink(missing_ok=True)
+
+#     # Move ZIP inside the folder for easier reference
+#     #final_zip_path = save_to_path.with_suffix('.zip')
+
+#     print("> Archive complete")
+#     print(f"> Final ZIP path: {final_zip_path}")
+
+#     return "Document processing complete", vectorstore, final_zip_path
+
+
+
+def embed_faiss_save_to_zip(
+    docs_out: List[Document],
+    save_folder: str,
+    embeddings_model_object: Embeddings, # Type hint for clarity
+    save_to: str = "faiss_embeddings",
+    model_name: str = "mixedbread-ai/mxbai-embed-xsmall-v1", # This is a descriptive name, not directly used in FAISS build
+    progress: gr.Progress = gr.Progress(track_tqdm=True)
+) -> Tuple[str, FAISS, Path]:
 
     print(f"> Total split documents: {len(docs_out)}")
 
-    vectorstore = FAISS.from_documents(documents=docs_out, embedding=embeddings_model_object)
+    # --- Progress Bar Integration Starts Here ---
+    print("Starting embedding generation and FAISS index construction...")
+
+    texts = []
+    metadatas = []
+    vectors = []
+    docstore = InMemoryDocstore()
+    index_to_docstore_id = {} # Maps FAISS index position to docstore ID
+
+    if not docs_out:
+        print("No documents provided. Skipping FAISS index creation.")
+        return "No documents to process", None, None # Or handle as an error
+
+    # 1. Generate Embeddings and Populate Data Structures with tqdm
+    # Wrap the iteration over docs_out with tqdm for a progress bar
+    for i, doc in tqdm(enumerate(docs_out), desc="Generating Embeddings", total=len(docs_out)):
+        # Store text and metadata
+        texts.append(doc.page_content)
+        metadatas.append(doc.metadata)
+
+        # Generate embedding for the current document
+        # embeddings_model_object.embed_documents expects a list of strings
+        # and returns a list of lists (embeddings). We take the first element.
+        vector = embeddings_model_object.embed_documents([doc.page_content])[0]
+        vectors.append(vector)
+
+        # Populate the internal docstore that FAISS uses
+        doc_id = str(uuid4()) # Generate a unique ID for each document
+        docstore.add({doc_id: doc}) # Add the full Document object to the docstore
+        index_to_docstore_id[i] = doc_id # Map FAISS index position (i) to its doc_id
+
+    print("\nEmbedding generation complete. Building FAISS index...")
+
+    # 2. Build the Raw FAISS Index
+    # Ensure all embeddings are numpy float32, which FAISS expects.
+    # BGE models (like bge-base-en-v1.5) typically produce L2-normalized embeddings,
+    # which are ideal for Inner Product (IP) similarity, equivalent to cosine similarity.
+    # If your model *does not* output normalized vectors and you want cosine similarity,
+    # you must normalize them here: `np.array([v / np.linalg.norm(v) for v in vectors]).astype("float32")`
+    # Otherwise, you might use IndexFlatL2 for Euclidean distance.
+    # For common embedding models and cosine similarity, `IndexFlatIP` with pre-normalized vectors is standard.
+    embeddings_np = np.array(vectors).astype("float32")
+    embedding_dimension = embeddings_np.shape[1]
+
+    # Create a raw FAISS index (e.g., IndexFlatIP for cosine similarity)
+    raw_faiss_index = faiss.IndexFlatIP(embedding_dimension)
+    raw_faiss_index.add(embeddings_np) # Add all vectors to the raw FAISS index
+
+    # 3. Create the LangChain FAISS Vectorstore from the components
+    # The `embedding_function` is used for subsequent queries to the vectorstore,
+    # not for building the initial index here (as we've already done that).
+    vectorstore = FAISS(
+        embedding_function=embeddings_model_object.embed_query,
+        index=raw_faiss_index,
+        docstore=docstore,
+        index_to_docstore_id=index_to_docstore_id
+        # distance_strategy defaults to COSINE, which is appropriate for IndexFlatIP
+    )
+    # --- Progress Bar Integration Ends Here ---
 
     save_to_path = Path(save_folder, save_to)
     save_to_path.mkdir(parents=True, exist_ok=True)
@@ -603,14 +723,68 @@ def embed_faiss_save_to_zip(docs_out, save_folder, embeddings_model_object, save
     index_faiss.unlink(missing_ok=True)
     index_pkl.unlink(missing_ok=True)
 
-    # Move ZIP inside the folder for easier reference
-    #final_zip_path = save_to_path.with_suffix('.zip')
-
     print("> Archive complete")
     print(f"> Final ZIP path: {final_zip_path}")
 
-    return "Document processing complete", vectorstore, final_zip_path
+    return "Document processing complete", vectorstore, final_zip_path # Return Path object for consistency
 
+def get_faiss_store(zip_file_path: str, embeddings_model: Embeddings) -> FAISS:
+    """
+    Loads a FAISS vector store from a ZIP archive.
+
+    Args:
+        zip_file_path: The string path pointing to the .zip archive containing
+                       index.faiss and index.pkl. This should be the
+                       final_zip_path returned by embed_faiss_save_to_zip.
+        embeddings_model: The embeddings model object (e.g., OpenAIEmbeddings, HuggingFaceEmbeddings)
+                          used to create the index. This is crucial for proper deserialization.
+
+    Returns:
+        A FAISS vector store object.
+    """
+
+    zip_file_path = Path(zip_file_path)
+
+    if not zip_file_path.exists():
+        raise FileNotFoundError(f"ZIP archive not found at: {zip_file_path}")
+    if not zip_file_path.suffix == '.zip':
+        raise ValueError(f"Expected a .zip file, but got: {zip_file_path}")
+
+    # Create a temporary directory to extract the FAISS index files
+    # tempfile.TemporaryDirectory() handles cleanup automatically when the 'with' block exits.
+    with tempfile.TemporaryDirectory() as temp_dir_str:
+        temp_extract_path = Path(temp_dir_str)
+
+        print(f"> Extracting {zip_file_path} to temporary directory: {temp_extract_path}")
+        with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+            # The zip file contains 'index.faiss' and 'index.pkl' directly at its root.
+            # So, extracting to temp_extract_path will place them as temp_extract_path/index.faiss
+            zip_ref.extractall(temp_extract_path)
+
+        # Verify that the files were extracted successfully
+        extracted_faiss_file = temp_extract_path / "index.faiss"
+        extracted_pkl_file = temp_extract_path / "index.pkl"
+
+        if not extracted_faiss_file.exists() or not extracted_pkl_file.exists():
+            raise FileNotFoundError(
+                f"Required FAISS index files (index.faiss, index.pkl) not found "
+                f"in extracted location: {temp_extract_path}. "
+                f"ZIP content might be structured unexpectedly."
+            )
+
+        print("> Loading FAISS index from extracted files...")
+        faiss_vstore = FAISS.load_local(
+            folder_path=str(temp_extract_path), # FAISS.load_local expects a string path
+            embeddings=embeddings_model,
+            allow_dangerous_deserialization=True
+        )
+        print("> FAISS index loaded successfully.")
+
+    # The temporary directory and its contents are automatically removed here
+    # when the `with tempfile.TemporaryDirectory()` block exits.
+    # No need for manual os.remove() calls for index.faiss and index.pkl.
+
+    return faiss_vstore
 
 
 # def sim_search_local_saved_vec(query, k_val, save_to="faiss_lambeth_census_embedding"):
