@@ -48,7 +48,7 @@ def determine_file_type(file_path):
             file_path (str): Path to the file.
     
         Returns:
-            str: File extension (e.g., '.pdf', '.docx', '.txt', '.html').
+            str: File extension (e.g., '.pdf', '.docx', '.txt', '.html', '.md').
         """
         return os.path.splitext(file_path)[1].lower()
 
@@ -74,6 +74,7 @@ def parse_file(file_paths, text_column='text'):
         '.pdf': parse_pdf,
         '.docx': parse_docx,
         '.txt': parse_txt,
+        '.md': parse_markdown,
         '.html': parse_html,
         '.htm': parse_html,  # Considering both .html and .htm for HTML files
         '.csv': lambda file_path: parse_csv_or_excel(file_path, text_column),
@@ -217,13 +218,24 @@ def parse_docx(file_path):
 
 def parse_txt(file_path):
     """
-    Read text from a TXT or HTML file.
+    Read text from a TXT, HTML, or MD file.
     
     Parameters:
-        file_path (str): Path to the TXT or HTML file.
+        file_path (str): Path to the TXT, HTML, or MD file.
     
     Returns:
         str: Text content of the file.
+    """
+    with open(file_path, 'r', encoding="utf-8") as file:
+        file_contents = file.read().replace("  ", " ").strip()
+
+        file_contents = text_regex_clean(file_contents)
+
+        return file_contents
+
+def parse_markdown(file_path):
+    """
+    Read text from a MD file.
     """
     with open(file_path, 'r', encoding="utf-8") as file:
         file_contents = file.read().replace("  ", " ").strip()
@@ -363,11 +375,11 @@ def text_to_docs(text_dict: dict, chunk_size: int = chunk_size) -> List[Document
 
         # Depending on the file extension, handle the content
         if ext == '.pdf':
-            docs, page_docs = pdf_text_to_docs(content, chunk_size)
-        elif ext in ['.html', '.htm', '.txt', '.docx']:
-            docs = html_text_to_docs(content, chunk_size)
+            docs, page_docs = pdf_text_to_docs(content, chunk_size=chunk_size)
+        elif ext in ['.html', '.htm', '.txt', '.docx', '.md']:
+            docs = html_text_to_docs(content, chunk_size=chunk_size)
         elif ext in ['.csv', '.xlsx']:
-            docs, page_docs = csv_excel_text_to_docs(content, chunk_size)
+            docs, page_docs = csv_excel_text_to_docs(content, chunk_size=chunk_size)
         else:
             print(f"Unsupported file type {ext} for {file_path}. Skipping.")
             continue
@@ -436,7 +448,7 @@ def pdf_text_to_docs(text, chunk_size: int = chunk_size) -> List[Document]:
 
     return doc_sections, page_docs#, parent_doc
 
-def html_text_to_docs(texts, metadatas, chunk_size:int = chunk_size):
+def html_text_to_docs(texts:list[str], metadatas:dict={}, chunk_size:int = chunk_size):
 
     text_splitter = RecursiveCharacterTextSplitter(
         separators=split_strat,#["\n\n", "\n", ".", "!", "?", ",", " ", ""],
