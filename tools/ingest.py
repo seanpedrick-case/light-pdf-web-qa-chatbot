@@ -14,17 +14,18 @@ import zipfile
 import tempfile
 from pathlib import Path
 
-from langchain_huggingface.embeddings import HuggingFaceEmbeddings
-#from langchain_community.embeddings import HuggingFaceEmbeddings # HuggingFaceInstructEmbeddings, 
-from langchain_community.vectorstores.faiss import FAISS
-#from langchain_community.vectorstores import Chroma
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.docstore.document import Document
-#from chatfuncs.config import EMBEDDINGS_MODEL_NAME
-from langchain_core.embeddings import Embeddings # Import Embeddings for type hinting
+from tools.embeddings import HuggingFaceEmbeddings
+from tools.faiss_store import FAISS, InMemoryDocstore
+from tools.text_splitter import RecursiveCharacterTextSplitter
+from tools.document import Document
+from typing import Protocol # For type hinting
 from tqdm import tqdm
-from langchain_community.docstore.in_memory import InMemoryDocstore # To manually build the docstore
 from uuid import uuid4 # To generate unique IDs for documents in the docstore
+
+# Type hint for embeddings
+class Embeddings(Protocol):
+    def embed_documents(self, texts: List[str]) -> List[List[float]]: ...
+    def embed_query(self, text: str) -> List[float]: ...
 from bs4 import BeautifulSoup
 from docx import Document as Doc
 from pypdf import PdfReader
@@ -695,7 +696,7 @@ def embed_faiss_save_to_zip(
     raw_faiss_index = faiss.IndexFlatIP(embedding_dimension)
     raw_faiss_index.add(embeddings_np) # Add all vectors to the raw FAISS index
 
-    # 3. Create the LangChain FAISS Vectorstore from the components
+    # 3. Create the FAISS Vectorstore from the components
     # The `embedding_function` is used for subsequent queries to the vectorstore,
     # not for building the initial index here (as we've already done that).
     vectorstore = FAISS(
@@ -703,7 +704,6 @@ def embed_faiss_save_to_zip(
         index=raw_faiss_index,
         docstore=docstore,
         index_to_docstore_id=index_to_docstore_id
-        # distance_strategy defaults to COSINE, which is appropriate for IndexFlatIP
     )
     # --- Progress Bar Integration Ends Here ---
 

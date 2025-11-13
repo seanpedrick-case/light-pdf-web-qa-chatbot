@@ -27,7 +27,6 @@ COPY requirements_aws.txt .
 RUN pip install torch==2.5.1+cpu --target=/install --index-url https://download.pytorch.org/whl/cpu \
 && pip install --no-cache-dir --target=/install sentence-transformers==4.1.0 --no-deps \
 && pip install --no-cache-dir --target=/install span-marker==1.7.0 --no-deps \
-&& pip install --no-cache-dir --target=/install langchain-huggingface==0.1.2 --no-deps \
 && pip install --no-cache-dir --target=/install keybert==0.9.0 --no-deps \
 && pip install --no-cache-dir --target=/install -r requirements_aws.txt
 

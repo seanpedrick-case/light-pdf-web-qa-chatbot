@@ -189,9 +189,9 @@ LOAD_LARGE_MODEL = get_or_create_env_var("LOAD_LARGE_MODEL", '0')
 
 LARGE_MODEL_NAME = get_or_create_env_var("LARGE_MODEL_NAME", "Phi 3.5 Mini (larger, slow)")
 
-LARGE_MODEL_REPO_ID = get_or_create_env_var("LARGE_MODEL_REPO_ID", "QuantFactory/Phi-3.5-mini-instruct-GGUF") # "QuantFactory/Phi-3-mini-128k-instruct-GGUF"), # "QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-v2"), #"microsoft/Phi-3-mini-4k-instruct-gguf"),#"TheBloke/Mistral-7B-OpenOrca-GGUF"),
+LARGE_MODEL_REPO_ID = get_or_create_env_var("LARGE_MODEL_REPO_ID", "QuantFactory/Phi-3.5-mini-instruct-GGUF") # THIS METHOD IS DEPRECATED AND WILL NO LONGER BE USED IN FUTURE (Llama-cpp-python is no longer being updated)
 
-LARGE_MODEL_GGUF_FILE = get_or_create_env_var("LARGE_MODEL_GGUF_FILE", "Phi-3.5-mini-instruct.Q4_K_M.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")  #"Meta-Llama-3-8B-Instruct-v2.Q6_K.gguf") #"Phi-3-mini-4k-instruct-q4.gguf")#"mistral-7b-openorca.Q4_K_M.gguf"),
+LARGE_MODEL_GGUF_FILE = get_or_create_env_var("LARGE_MODEL_GGUF_FILE", "Phi-3.5-mini-instruct.Q4_K_M.gguf")
 
 # Build up options for models
 default_model_choices = [SMALL_MODEL_NAME]
