@@ -1,12 +1,8 @@
 beautifulsoup4==4.13.4
 google-genai==1.50.0
-pandas==2.2.3
+pandas==2.3.3
 markdown==3.8.1
 transformers==4.57.1
-# For Windows https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.2/llama_cpp_python-0.3.2-cp311-#cp311-win_amd64.whl -C cmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS" 
-# llama-cpp-python==0.3.2 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu # For linux if dependencies for below build command are not available in the environment
-#llama-cpp-python==0.3.9 -C cmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS" # CPU
-#llama-cpp-python==0.3.9 -C cmake.args="-DGGML_CUDA=on" # With CUDA
 torch>=2.6.0 --extra-index-url https://download.pytorch.org/whl/cpu
 sentence_transformers==5.1.2
 faiss-cpu==1.10.0
