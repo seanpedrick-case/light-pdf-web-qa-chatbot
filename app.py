@@ -142,7 +142,7 @@ def load_model(model_type:str, gpu_layers:int, gpu_config:dict=gpu_config, cpu_c
 # RUN UI
 ###
 
-app = gr.Blocks(theme = gr.themes.Default(primary_hue="blue"), fill_width=True)#css=".gradio-container {background-color: black}")
+app = gr.Blocks(fill_width=True)#css=".gradio-container {background-color: black}")
 
 with app:
     model_type = SMALL_MODEL_NAME
@@ -203,7 +203,7 @@ with app:
 
         with gr.Row():
             #chat_height = 500
-            chatbot = gr.Chatbot(value=None, avatar_images=('user.jfif', 'bot.jpg'), scale = 1, resizable=True, show_copy_all_button=True, show_copy_button=True, show_share_button=None, type='messages', max_height=500)
+            chatbot = gr.Chatbot(value=None, avatar_images=('user.jfif', 'bot.jpg'), scale = 1, resizable=True, buttons=['copy', 'copy_all', 'share'], max_height=500)
             with gr.Accordion("Source paragraphs with the most relevant text will appear here", open = True):
                 sources = gr.HTML(value = "No relevant source paragraphs currently loaded", max_height=500) # , height=chat_height
 
@@ -352,6 +352,6 @@ with app:
 
 if __name__ == "__main__":
     if COGNITO_AUTH == "1":
-        app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+        app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, theme = gr.themes.Default(primary_hue="blue"))
     else:
-        app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+        app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, theme = gr.themes.Default(primary_hue="blue"))
