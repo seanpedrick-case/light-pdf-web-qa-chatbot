@@ -970,9 +970,20 @@ def highlight_found_text(chat_history: list[dict], source_texts: list[dict], hlt
         
     print("chat_history:", chat_history)
         
-    response_text = next(
-    (entry['content'] for entry in reversed(chat_history) if entry.get('role') == 'assistant'),
-    "")
+    response_content = next(
+        (entry['content'] for entry in reversed(chat_history) if entry.get('role') == 'assistant'),
+        "",
+    )
+    # Gradio chat format: content can be a list of blocks e.g. [{'text': '...', 'type': 'text'}]
+    if isinstance(response_content, list):
+        response_text = " ".join(
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in response_content
+        )
+    elif isinstance(response_content, str):
+        response_text = response_content
+    else:
+        response_text = str(response_content) if response_content else ""
         
     source_texts = extract_text_from_input(source_texts)
 
@@ -985,6 +996,8 @@ def highlight_found_text(chat_history: list[dict], source_texts: list[dict], hlt
 
     found_positions = {}
     for x in sections:
+        if not isinstance(x, str):
+            continue
         text_start_pos = 0
         while text_start_pos != -1:
             text_start_pos = source_texts.find(x, text_start_pos)
