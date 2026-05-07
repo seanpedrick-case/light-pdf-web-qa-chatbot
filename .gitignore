@@ -13,3 +13,4 @@ config/*
 output/*
 input/*
 borough_plan/*
+.vscode/*
