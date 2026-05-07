@@ -4,10 +4,11 @@ emoji: 🌍
 colorFrom: blue
 colorTo: yellow
 sdk: gradio
-sdk_version: 5.25.2
+sdk_version: 6.5.1
 app_file: app.py
-pinned: false
+pinned: true
 license: apache-2.0
+short_description: Chat with websites and documents using Gemma 3 1B
 ---
 
-Chat with a pdf file or web page using a light language model through a Gradio interface. Quick responses even just using CPU.
+Chat with a pdf file or web page using a small language model (Gemma 3 1B) through a Gradio interface. Quick responses even just using CPU. Default dataset is the [user guide for my Redaction app](https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html), which you can try out [here](https://huggingface.co/spaces/seanpedrickcase/document_redaction) for basic usage, or [here](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm) for GPU-enabled features

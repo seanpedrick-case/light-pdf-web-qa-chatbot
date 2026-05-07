@@ -1,11 +1,10 @@
 import os
 from typing import Type
-#from langchain_huggingface.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
+from tools.faiss_store import FAISS
 import gradio as gr
 import pandas as pd
 from torch import float16, float32
-from llama_cpp import Llama
+
 from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM,  AutoModelForCausalLM
 
@@ -13,7 +12,7 @@ from tools.ingest import embed_faiss_save_to_zip, load_embeddings_model, get_fai
 from tools.helper_functions import get_connection_params, reveal_feedback_buttons, wipe_logs
 from tools.aws_functions import upload_file_to_s3
 from tools.auth import authenticate_user
-from tools.config import FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, HOST_NAME, COGNITO_AUTH, INPUT_FOLDER, OUTPUT_FOLDER, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, DEFAULT_EMBEDDINGS_LOCATION, EMBEDDINGS_MODEL_NAME, DEFAULT_DATA_SOURCE, HF_TOKEN, LARGE_MODEL_REPO_ID, LARGE_MODEL_GGUF_FILE, LARGE_MODEL_NAME, SMALL_MODEL_NAME, SMALL_MODEL_REPO_ID, DEFAULT_DATA_SOURCE_NAME, DEFAULT_EXAMPLES, DEFAULT_MODEL_CHOICES, RUN_GEMINI_MODELS, LOAD_LARGE_MODEL
+from tools.config import FEEDBACK_LOGS_FOLDER, ACCESS_LOGS_FOLDER, USAGE_LOGS_FOLDER, HOST_NAME, COGNITO_AUTH, INPUT_FOLDER, OUTPUT_FOLDER, MAX_QUEUE_SIZE, DEFAULT_CONCURRENCY_LIMIT, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, DEFAULT_EMBEDDINGS_LOCATION, EMBEDDINGS_MODEL_NAME, DEFAULT_DATA_SOURCE, HF_TOKEN, LARGE_MODEL_REPO_ID, LARGE_MODEL_GGUF_FILE, LARGE_MODEL_NAME, SMALL_MODEL_NAME, SMALL_MODEL_REPO_ID, DEFAULT_DATA_SOURCE_NAME, DEFAULT_EXAMPLES, DEFAULT_MODEL_CHOICES, RUN_GEMINI_MODELS, LOAD_LARGE_MODEL, GEMINI_API_KEY
 from tools.model_load import torch_device, gpu_config, cpu_config, context_length
 import tools.chatfuncs as chatf
 import tools.ingest as ing
@@ -39,10 +38,11 @@ if isinstance(DEFAULT_MODEL_CHOICES, str): default_model_choices = eval(DEFAULT_
 ###
 # Load in default embeddings and embeddings model name
 embeddings_model = load_embeddings_model(EMBEDDINGS_MODEL_NAME)
-vectorstore = get_faiss_store(zip_file_path=DEFAULT_EMBEDDINGS_LOCATION,embeddings_model=embeddings_model)#globals()["embeddings"])
+# vectorstore = get_faiss_store(zip_file_path=DEFAULT_EMBEDDINGS_LOCATION,embeddings_model=embeddings_model)#globals()["embeddings"])
+vectorstore = None
 
 chatf.embeddings = embeddings_model
-chatf.vectorstore = vectorstore
+# chatf.vectorstore = vectorstore
 
 def docs_to_faiss_save(docs_out:PandasDataFrame, embeddings_model=embeddings_model):
 
@@ -64,17 +64,17 @@ def create_hf_model(model_name:str, hf_token=HF_TOKEN):
             model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")#, torch_dtype=torch.float16)
         else:
             if hf_token:
-                model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", token=hf_token, torch_dtype=float32) # , torch_dtype=float16 - not compatible with CPU and Gemma 3
+                model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", token=hf_token) # , torch_dtype=float16 - not compatible with CPU and Gemma 3
             else:
-                model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", torch_dtype=float32) # , torch_dtype=float16
+                model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto") # , torch_dtype=float16
     else:
         if "flan" in model_name:
             model = AutoModelForSeq2SeqLM.from_pretrained(model_name)#, torch_dtype=torch.float16)
         else:
             if hf_token:
-                model = AutoModelForCausalLM.from_pretrained(model_name, token=hf_token, torch_dtype=float32) # , torch_dtype=float16
+                model = AutoModelForCausalLM.from_pretrained(model_name, token=hf_token) # , torch_dtype=float16
             else:
-                model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=float32) # , torch_dtype=float16
+                model = AutoModelForCausalLM.from_pretrained(model_name) # , torch_dtype=float16
 
     if hf_token:
         tokenizer = AutoTokenizer.from_pretrained(model_name, model_max_length = context_length, token=hf_token)
@@ -97,6 +97,7 @@ def load_model(model_type:str, gpu_layers:int, gpu_config:dict=gpu_config, cpu_c
             print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU.")
 
         try:
+            from llama_cpp import Llama
             model = Llama(
             model_path=hf_hub_download(
             repo_id=LARGE_MODEL_REPO_ID,
@@ -141,7 +142,7 @@ def load_model(model_type:str, gpu_layers:int, gpu_config:dict=gpu_config, cpu_c
 # RUN UI
 ###
 
-app = gr.Blocks(theme = gr.themes.Default(primary_hue="blue"), fill_width=True)#css=".gradio-container {background-color: black}")
+app = gr.Blocks(fill_width=True)#css=".gradio-container {background-color: black}")
 
 with app:
     model_type = SMALL_MODEL_NAME
@@ -202,7 +203,7 @@ with app:
 
         with gr.Row():
             #chat_height = 500
-            chatbot = gr.Chatbot(value=None, avatar_images=('user.jfif', 'bot.jpg'), scale = 1, resizable=True, show_copy_all_button=True, show_copy_button=True, show_share_button=None, type='messages', max_height=500)
+            chatbot = gr.Chatbot(value=None, avatar_images=('user.jfif', 'bot.jpg'), scale = 1, resizable=True, buttons=['copy', 'copy_all', 'share'], max_height=500)
             with gr.Accordion("Source paragraphs with the most relevant text will appear here", open = True):
                 sources = gr.HTML(value = "No relevant source paragraphs currently loaded", max_height=500) # , height=chat_height
 
@@ -248,9 +249,9 @@ with app:
             with gr.Column(scale=3):
                 model_choice = gr.Radio(label="Choose a chat model", value=SMALL_MODEL_NAME, choices = default_model_choices)
                 if RUN_GEMINI_MODELS == "1":
-                    in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password",interactive=True, visible=True)
+                    in_api_key = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password",interactive=True, visible=True)
                 else:
-                    in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password",interactive=True, visible=False)
+                    in_api_key = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password",interactive=True, visible=False)
             with gr.Column(scale=1):
                 change_model_button = gr.Button(value="Load model")
 
@@ -264,7 +265,7 @@ with app:
         load_text = gr.Text(label="Load status")        
 
     gr.HTML(
-        "<center>This app is powered by Gradio, Transformers, and Llama.cpp.</center>"
+        "<center>This app is powered by Gradio and Transformers.</center>"
     )
 
     examples_set.change(fn=chatf.update_message, inputs=[examples_set], outputs=[message])
@@ -351,6 +352,6 @@ with app:
 
 if __name__ == "__main__":
     if COGNITO_AUTH == "1":
-        app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+        app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, theme = gr.themes.Default(primary_hue="blue"))
     else:
-        app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+        app.queue(max_size=int(MAX_QUEUE_SIZE), default_concurrency_limit=int(DEFAULT_CONCURRENCY_LIMIT)).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, theme = gr.themes.Default(primary_hue="blue"))

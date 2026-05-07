@@ -3,7 +3,7 @@ from tools.ingest import parse_file, text_to_docs, load_embeddings_model, embed_
 borough_plan_text, file_names = parse_file([open("Lambeth_2030-Our_Future_Our_Lambeth.pdf")])
 print("Borough plan text created")
 
-#print(borough_plan_text)
+print(borough_plan_text)
 
 borough_plan_docs = text_to_docs(borough_plan_text)
 print("Borough plan docs created")

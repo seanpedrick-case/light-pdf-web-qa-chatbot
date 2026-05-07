@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/python:3.11.11-slim-bookworm AS builder
+FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS builder
 
 RUN apt-get update && \
     apt-get install -y \
@@ -24,15 +24,14 @@ WORKDIR /src
 
 COPY requirements_aws.txt .
 
-RUN pip install torch==2.5.1+cpu --target=/install --index-url https://download.pytorch.org/whl/cpu \
-&& pip install --no-cache-dir --target=/install sentence-transformers==4.1.0 --no-deps \
+RUN pip install torch>=2.6.0+cpu --target=/install --index-url https://download.pytorch.org/whl/cpu \
+&& pip install --no-cache-dir --target=/install sentence-transformers==5.1.2 --no-deps \
 && pip install --no-cache-dir --target=/install span-marker==1.7.0 --no-deps \
-&& pip install --no-cache-dir --target=/install langchain-huggingface==0.1.2 --no-deps \
 && pip install --no-cache-dir --target=/install keybert==0.9.0 --no-deps \
 && pip install --no-cache-dir --target=/install -r requirements_aws.txt
 
 # Stage 2: Final runtime image
-FROM public.ecr.aws/docker/library/python:3.11.11-slim-bookworm
+FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie
 
 RUN apt-get update && \
     apt-get install -y \
@@ -48,7 +47,7 @@ RUN mkdir -p /home/user/app/{output,input,tld,logs,usage,feedback,config} \
     && chown -R user:user /home/user/app
 
 # Copy installed packages from builder stage
-COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
+COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
 
 # Switch to the "user" user
 USER user

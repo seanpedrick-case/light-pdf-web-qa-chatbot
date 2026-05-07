@@ -1,11 +1,12 @@
 import re
 import os
 import datetime
-from typing import Type, Dict, List, Tuple
+from typing import Type, Dict, List, Tuple, Union
 import time
 from itertools import compress
 import pandas as pd
-import google.generativeai as ai
+from google import genai as ai
+from google.genai import types
 import gradio as gr
 from gradio import Progress
 import boto3
@@ -14,7 +15,10 @@ from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
 from keybert import KeyBERT
-from langchain_huggingface.embeddings import HuggingFaceEmbeddings
+from tools.embeddings import HuggingFaceEmbeddings
+from tools.faiss_store import FAISS
+from tools.text_splitter import RecursiveCharacterTextSplitter
+from tools.document import Document
 
 # For Name Entity Recognition model
 #from span_marker import SpanMarkerModel # Not currently used
@@ -26,12 +30,6 @@ import Stemmer
 import torch.cuda
 from threading import Thread
 from transformers import pipeline, TextIteratorStreamer
-# Langchain functions
-from langchain.prompts import PromptTemplate
-from langchain_community.vectorstores import FAISS
-from langchain_community.retrievers import SVMRetriever 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.docstore.document import Document
 
 from tools.prompts import instruction_prompt_template_alpaca, instruction_prompt_mistral_orca, instruction_prompt_phi3, instruction_prompt_llama3, instruction_prompt_qwen, instruction_prompt_template_orca, instruction_prompt_gemma, instruction_prompt_template_gemini_aws
 from tools.model_load import temperature, max_new_tokens, sample, repetition_penalty, top_p, top_k, torch_device, CtransGenGenerationConfig, max_tokens
@@ -79,26 +77,19 @@ kw_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniL
 
 def base_prompt_templates(model_type:str = SMALL_MODEL_NAME):    
   
-    #EXAMPLE_PROMPT = PromptTemplate(
-    #    template="\nCONTENT:\n\n{page_content}\n\nSOURCE: {source}\n\n",
-    #    input_variables=["page_content", "source"],
-    #)
-
-    CONTENT_PROMPT = PromptTemplate(
-        template="{page_content}\n\n",#\n\nSOURCE: {source}\n\n",
-        input_variables=["page_content"]
-    )
+    # Simple string template for content
+    CONTENT_PROMPT_TEMPLATE = "{page_content}\n\n"
 
 # The main prompt:  
 
     if model_type == SMALL_MODEL_NAME:
-        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_gemma, input_variables=['question', 'summaries'])
+        INSTRUCTION_PROMPT_TEMPLATE = instruction_prompt_gemma
     elif model_type == LARGE_MODEL_NAME:
-        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_phi3, input_variables=['question', 'summaries'])
+        INSTRUCTION_PROMPT_TEMPLATE = instruction_prompt_phi3
     else:
-        INSTRUCTION_PROMPT=PromptTemplate(template=instruction_prompt_template_gemini_aws, input_variables=['question', 'summaries'])
+        INSTRUCTION_PROMPT_TEMPLATE = instruction_prompt_template_gemini_aws
 
-    return INSTRUCTION_PROMPT, CONTENT_PROMPT
+    return INSTRUCTION_PROMPT_TEMPLATE, CONTENT_PROMPT_TEMPLATE
 
 def write_out_metadata_as_string(metadata_in:str):
     metadata_string = [f"{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}" for d in metadata_in] # ['metadata']
@@ -175,7 +166,7 @@ def generate_expanded_prompt(
 
     sources_docs_content_string = '<br><br>'.join(doc_df['content_meta'])#.replace("  "," ")#.strip()
     
-    instruction_prompt_out = instruction_prompt.format(question=new_question_kworded, summaries=docs_content_string)
+    instruction_prompt_out = instruction_prompt.replace('{question}', new_question_kworded).replace('{summaries}', docs_content_string)
             
     return instruction_prompt_out, sources_docs_content_string, new_question_kworded
 
@@ -269,9 +260,9 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     
     return response
 
-def construct_gemini_generative_model(in_api_key: str, temperature: float, model_choice: str, system_prompt: str, max_tokens: int) -> Tuple[object, dict]:
+def construct_gemini_generative_model(in_api_key: str, temperature: float, model_choice: str, system_prompt: str, max_tokens: int, random_seed: int = None) -> Tuple[object, dict]:
     """
-    Constructs a GenerativeModel for Gemini API calls.
+    Constructs a Client for Gemini API calls using the new google.genai package.
 
     Parameters:
     - in_api_key (str): The API key for authentication.
@@ -279,34 +270,37 @@ def construct_gemini_generative_model(in_api_key: str, temperature: float, model
     - model_choice (str): The choice of model to use for generation.
     - system_prompt (str): The system prompt to guide the generation.
     - max_tokens (int): The maximum number of tokens to generate.
+    - random_seed (int, optional): Random seed for reproducibility.
 
     Returns:
-    - Tuple[object, dict]: A tuple containing the constructed GenerativeModel and its configuration.
+    - Tuple[object, dict]: A tuple containing the constructed Client and its configuration.
     """
-    # Construct a GenerativeModel
+    # Construct a Client for the new API
     try:
         if in_api_key:
             #print("Getting API key from textbox")
             api_key = in_api_key
-            ai.configure(api_key=api_key)
+            client = ai.Client(api_key=api_key)
         elif "GOOGLE_API_KEY" in os.environ:
             #print("Searching for API key in environmental variables")
             api_key = os.environ["GOOGLE_API_KEY"]
-            ai.configure(api_key=api_key)
+            client = ai.Client(api_key=api_key)
         else:
-            print("No API key foound")
+            print("No API key found")
             raise gr.Error("No API key found.")
     except Exception as e:
         print(e)
+        raise
     
-    config = ai.GenerationConfig(temperature=temperature, max_output_tokens=max_tokens)
+    # Create config with optional random_seed
+    config_kwargs = {"temperature": temperature, "max_output_tokens": max_tokens}
+    if random_seed is not None:
+        config_kwargs["seed"] = random_seed
+    config = types.GenerateContentConfig(**config_kwargs)
 
     print("model_choice:", model_choice)
-
-    #model = ai.GenerativeModel.from_cached_content(cached_content=cache, generation_config=config)
-    model = ai.GenerativeModel(model_name=model_choice, system_instruction=system_prompt, generation_config=config)
     
-    return model, config
+    return client, config
 
 # Function to send a request and update history
 def send_request(prompt: str, conversation_history: List[dict], model: object, config: dict, model_choice: str, system_prompt: str, temperature: float, progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
@@ -333,7 +327,15 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
     # Generate the model's response
     if "gemini" in model_choice:
         try:
-            response = model.generate_content(contents=full_prompt, generation_config=config)
+            # New API: client.models.generate_content instead of model.generate_content
+            gemini_response = model.models.generate_content(model=model_choice, contents=full_prompt, config=config)
+            # Wrap response in ResponseObject for backwards compatibility
+            usage_metadata = {}
+            if hasattr(gemini_response, 'usage_metadata'):
+                usage_metadata = gemini_response.usage_metadata
+            elif hasattr(gemini_response, 'usage'):
+                usage_metadata = gemini_response.usage
+            response = ResponseObject(text=gemini_response.text, usage_metadata=usage_metadata)
         except Exception as e:
             # If fails, try again after 10 seconds in case there is a throttle limit
             print(e)
@@ -343,7 +345,14 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
                 print(out_message)
                 progress(0.5, desc=out_message)
                 time.sleep(30)
-                response = model.generate_content(contents=full_prompt, generation_config=config)
+                gemini_response = model.models.generate_content(model=model_choice, contents=full_prompt, config=config)
+                # Wrap response in ResponseObject for backwards compatibility
+                usage_metadata = {}
+                if hasattr(gemini_response, 'usage_metadata'):
+                    usage_metadata = gemini_response.usage_metadata
+                elif hasattr(gemini_response, 'usage'):
+                    usage_metadata = gemini_response.usage
+                response = ResponseObject(text=gemini_response.text, usage_metadata=usage_metadata)
             except Exception as e:
                 print(e)
                 return "", conversation_history
@@ -559,7 +568,7 @@ def produce_streaming_answer_chatbot(
         history.append({"metadata":None, "options":None, "role": "assistant", "content": ''})
         
         for char in clean_response_text:
-            time.sleep(0.005)
+            time.sleep(0.001)
             history[-1]['content'] += char
             yield history
     
@@ -594,7 +603,7 @@ def produce_streaming_answer_chatbot(
         history.append({"metadata":None, "options":None, "role": "assistant", "content": ''})
         
         for char in clean_response_text:
-            time.sleep(0.005)
+            time.sleep(0.001)
             history[-1]['content'] += char
             yield history
 
@@ -795,31 +804,29 @@ def hybrid_retrieval(
     
 
     # 3rd level check on retrieved docs with SVM retriever
-    # Check the type of the embeddings_model object
-    embeddings_type = type(embeddings_model)
-
-
-    #hf_embeddings = HuggingFaceEmbeddings(**embeddings)
-    hf_embeddings = embeddings_model
-    
-    svm_retriever = SVMRetriever.from_texts(content_keep, hf_embeddings, k = k_val)
-    svm_result = svm_retriever.invoke(new_question_kworded)
-
-    
-    svm_rank=[]
+    # Note: SVM retriever removed - using vector similarity only
+    # If svm_weight > 0, we'll use a simple ranking based on vector similarity
+    svm_rank = []
     svm_score = []
+    
+    if svm_weight > 0:
+        # Use vector similarity ranking as a proxy for SVM ranking
+        # This maintains the same interface but uses vector scores
+        for i, vec_item in enumerate(docs_keep):
+            # Use inverse rank (lower rank = higher score)
+            rank = i + 1
+            svm_rank.append(rank)
+            svm_score.append((docs_keep_length/rank)*svm_weight)
+    else:
+        # If svm_weight is 0, set all scores to 0
+        svm_rank = [0] * docs_keep_length
+        svm_score = [0.0] * docs_keep_length
 
-    for vec_item in docs_keep:
-        x = 0
-        for svm_item in svm_result:
-            x = x + 1
-            if svm_item.page_content == vec_item[0].page_content:
-                svm_rank.append(x)
-                svm_score.append((docs_keep_length/x)*svm_weight)
 
-
-    ## Calculate final score based on three ranking methods
-    final_score = [a  + b + c for a, b, c in zip(vec_score, bm25_score, svm_score)]
+    ## Calculate final score based on ranking methods (vector, BM25, and optionally SVM)
+    # Ensure all lists have the same length
+    min_len = min(len(vec_score), len(bm25_score), len(svm_score))
+    final_score = [a + b + c for a, b, c in zip(vec_score[:min_len], bm25_score[:min_len], svm_score[:min_len])]
     final_rank = [sorted(final_score, reverse=True).index(x)+1 for x in final_score]
     # Force final_rank to increment by 1 each time
     final_rank = list(pd.Series(final_rank).rank(method='first'))
@@ -963,9 +970,20 @@ def highlight_found_text(chat_history: list[dict], source_texts: list[dict], hlt
         
     print("chat_history:", chat_history)
         
-    response_text = next(
-    (entry['content'] for entry in reversed(chat_history) if entry.get('role') == 'assistant'),
-    "")
+    response_content = next(
+        (entry['content'] for entry in reversed(chat_history) if entry.get('role') == 'assistant'),
+        "",
+    )
+    # Gradio chat format: content can be a list of blocks e.g. [{'text': '...', 'type': 'text'}]
+    if isinstance(response_content, list):
+        response_text = " ".join(
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in response_content
+        )
+    elif isinstance(response_content, str):
+        response_text = response_content
+    else:
+        response_text = str(response_content) if response_content else ""
         
     source_texts = extract_text_from_input(source_texts)
 
@@ -978,6 +996,8 @@ def highlight_found_text(chat_history: list[dict], source_texts: list[dict], hlt
 
     found_positions = {}
     for x in sections:
+        if not isinstance(x, str):
+            continue
         text_start_pos = 0
         while text_start_pos != -1:
             text_start_pos = source_texts.find(x, text_start_pos)

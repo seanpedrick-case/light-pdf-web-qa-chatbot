@@ -14,17 +14,18 @@ import zipfile
 import tempfile
 from pathlib import Path
 
-from langchain_huggingface.embeddings import HuggingFaceEmbeddings
-#from langchain_community.embeddings import HuggingFaceEmbeddings # HuggingFaceInstructEmbeddings, 
-from langchain_community.vectorstores.faiss import FAISS
-#from langchain_community.vectorstores import Chroma
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.docstore.document import Document
-#from chatfuncs.config import EMBEDDINGS_MODEL_NAME
-from langchain_core.embeddings import Embeddings # Import Embeddings for type hinting
+from tools.embeddings import HuggingFaceEmbeddings
+from tools.faiss_store import FAISS, InMemoryDocstore
+from tools.text_splitter import RecursiveCharacterTextSplitter
+from tools.document import Document
+from typing import Protocol # For type hinting
 from tqdm import tqdm
-from langchain_community.docstore.in_memory import InMemoryDocstore # To manually build the docstore
 from uuid import uuid4 # To generate unique IDs for documents in the docstore
+
+# Type hint for embeddings
+class Embeddings(Protocol):
+    def embed_documents(self, texts: List[str]) -> List[List[float]]: ...
+    def embed_query(self, text: str) -> List[float]: ...
 from bs4 import BeautifulSoup
 from docx import Document as Doc
 from pypdf import PdfReader
@@ -48,7 +49,7 @@ def determine_file_type(file_path):
             file_path (str): Path to the file.
     
         Returns:
-            str: File extension (e.g., '.pdf', '.docx', '.txt', '.html').
+            str: File extension (e.g., '.pdf', '.docx', '.txt', '.html', '.md').
         """
         return os.path.splitext(file_path)[1].lower()
 
@@ -74,6 +75,7 @@ def parse_file(file_paths, text_column='text'):
         '.pdf': parse_pdf,
         '.docx': parse_docx,
         '.txt': parse_txt,
+        '.md': parse_markdown,
         '.html': parse_html,
         '.htm': parse_html,  # Considering both .html and .htm for HTML files
         '.csv': lambda file_path: parse_csv_or_excel(file_path, text_column),
@@ -217,13 +219,24 @@ def parse_docx(file_path):
 
 def parse_txt(file_path):
     """
-    Read text from a TXT or HTML file.
+    Read text from a TXT, HTML, or MD file.
     
     Parameters:
-        file_path (str): Path to the TXT or HTML file.
+        file_path (str): Path to the TXT, HTML, or MD file.
     
     Returns:
         str: Text content of the file.
+    """
+    with open(file_path, 'r', encoding="utf-8") as file:
+        file_contents = file.read().replace("  ", " ").strip()
+
+        file_contents = text_regex_clean(file_contents)
+
+        return file_contents
+
+def parse_markdown(file_path):
+    """
+    Read text from a MD file.
     """
     with open(file_path, 'r', encoding="utf-8") as file:
         file_contents = file.read().replace("  ", " ").strip()
@@ -363,11 +376,11 @@ def text_to_docs(text_dict: dict, chunk_size: int = chunk_size) -> List[Document
 
         # Depending on the file extension, handle the content
         if ext == '.pdf':
-            docs, page_docs = pdf_text_to_docs(content, chunk_size)
-        elif ext in ['.html', '.htm', '.txt', '.docx']:
-            docs = html_text_to_docs(content, chunk_size)
+            docs, page_docs = pdf_text_to_docs(content, chunk_size=chunk_size)
+        elif ext in ['.html', '.htm', '.txt', '.docx', '.md']:
+            docs = html_text_to_docs(content, chunk_size=chunk_size)
         elif ext in ['.csv', '.xlsx']:
-            docs, page_docs = csv_excel_text_to_docs(content, chunk_size)
+            docs, page_docs = csv_excel_text_to_docs(content, chunk_size=chunk_size)
         else:
             print(f"Unsupported file type {ext} for {file_path}. Skipping.")
             continue
@@ -436,7 +449,7 @@ def pdf_text_to_docs(text, chunk_size: int = chunk_size) -> List[Document]:
 
     return doc_sections, page_docs#, parent_doc
 
-def html_text_to_docs(texts, metadatas, chunk_size:int = chunk_size):
+def html_text_to_docs(texts:list[str], metadatas:dict={}, chunk_size:int = chunk_size):
 
     text_splitter = RecursiveCharacterTextSplitter(
         separators=split_strat,#["\n\n", "\n", ".", "!", "?", ",", " ", ""],
@@ -683,7 +696,7 @@ def embed_faiss_save_to_zip(
     raw_faiss_index = faiss.IndexFlatIP(embedding_dimension)
     raw_faiss_index.add(embeddings_np) # Add all vectors to the raw FAISS index
 
-    # 3. Create the LangChain FAISS Vectorstore from the components
+    # 3. Create the FAISS Vectorstore from the components
     # The `embedding_function` is used for subsequent queries to the vectorstore,
     # not for building the initial index here (as we've already done that).
     vectorstore = FAISS(
@@ -691,7 +704,6 @@ def embed_faiss_save_to_zip(
         index=raw_faiss_index,
         docstore=docstore,
         index_to_docstore_id=index_to_docstore_id
-        # distance_strategy defaults to COSINE, which is appropriate for IndexFlatIP
     )
     # --- Progress Bar Integration Ends Here ---
 
