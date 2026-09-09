@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS builder
+FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS builder
 
 RUN apt-get update && \
     apt-get install -y \
@@ -24,14 +24,14 @@ WORKDIR /src
 
 COPY requirements_aws.txt .
 
-RUN pip install torch>=2.6.0+cpu --target=/install --index-url https://download.pytorch.org/whl/cpu \
-&& pip install --no-cache-dir --target=/install sentence-transformers==5.1.2 --no-deps \
-&& pip install --no-cache-dir --target=/install span-marker==1.7.0 --no-deps \
+RUN pip install torch>=2.14.0+cpu --target=/install --index-url https://download.pytorch.org/whl/cpu \
+&& pip install --no-cache-dir --target=/install sentence-transformers==6.0.1 --no-deps \
+&& pip install --no-cache-dir --target=/install span-marker==1.8.1 --no-deps \
 && pip install --no-cache-dir --target=/install keybert==0.9.0 --no-deps \
 && pip install --no-cache-dir --target=/install -r requirements_aws.txt
 
 # Stage 2: Final runtime image
-FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie
+FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie
 
 RUN apt-get update && \
     apt-get install -y \
