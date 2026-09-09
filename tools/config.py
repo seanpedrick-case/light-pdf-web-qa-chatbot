@@ -203,7 +203,7 @@ if RUN_AWS_FUNCTIONS == "1":
     default_model_choices.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0"])
 
 if RUN_GEMINI_MODELS == "1":
-    GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+    GEMINI_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest"]
     default_model_choices.extend(GEMINI_MODELS)
 
 

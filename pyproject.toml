@@ -1,0 +1,134 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "light-pdf-web-qa-chatbot"
+version = "0.2.0"
+description = "Chat with PDFs, web pages, or data files using a Gradio-based QA chatbot"
+readme = "README.md"
+authors = [
+    { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
+]
+maintainers = [
+    { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
+]
+license = "MIT"
+keywords = [
+    "chatbot",
+    "qa",
+    "pdf",
+    "rag",
+    "embeddings",
+    "gradio",
+    "nlp",
+    "document-qa",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Text Processing :: General",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "beautifulsoup4<=4.15.0",
+    "google-genai<=2.22.0",
+    "pandas<=3.0.5",
+    "markdown<=3.10.3",
+    "transformers<=5.16.1",
+    # CPU torch by default. For a CPU wheel from the PyTorch index:
+    #   pip install "torch>=2.14.0" --index-url https://download.pytorch.org/whl/cpu
+    "torch>=2.14.0",
+    "sentence-transformers<=6.0.1",
+    "faiss-cpu<=1.15.0",
+    "pypdf<=6.18.0",
+    "python-docx<=1.2.0",
+    "keybert<=0.9.0",
+    "gradio<=6.26.0",
+    "nltk<=3.10.3",
+    "bm25s<=0.3.11",
+    "PyStemmer<=3.1.0",
+    "scipy>=1.18.1",
+    "numpy<=2.5.3",
+    "boto3<=1.43.90",
+    "python-dotenv<=1.2.3",
+]
+
+[project.optional-dependencies]
+
+# For testing
+dev = ["pytest"]
+test = ["pytest", "pytest-cov"]
+
+# GPU: same stack as the base install, but use a CUDA build of torch.
+# After `pip install .[gpu]`, (re)install torch from the CUDA wheel index, e.g.:
+#   pip install "torch>=2.14.0" --index-url https://download.pytorch.org/whl/cu130
+gpu = [
+    "torch>=2.14.0",
+]
+
+# AWS: packages used in the AWS/Docker image beyond the base requirements
+# (torch, sentence-transformers, and keybert are expected to be provided by the image).
+aws = [
+    "scikit-learn<=1.9.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/seanpedrick-case/light-pdf-web-qa-chatbot"
+Repository = "https://github.com/seanpedrick-case/light-pdf-web-qa-chatbot"
+"Hugging Face Space" = "https://huggingface.co/spaces/seanpedrickcase/light_pdf_web_qa_chatbot"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = [
+    "app",
+    "ingest_borough_plan",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tools*"]
+exclude = [
+    "test*",
+]
+
+# Configuration for Ruff linter:
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = [
+    "E501",  # line-too-long (handled with Black)
+    "E402",  # module-import-not-at-top-of-file (sometimes needed for conditional imports)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+
+# Configuration for a Black formatter:
+[tool.black]
+line-length = 88
+target-version = ['py310']
+
+# Configuration for pytest:
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+testpaths = ["test"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+]
