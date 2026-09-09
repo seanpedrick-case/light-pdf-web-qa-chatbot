@@ -14,3 +14,4 @@ output/*
 input/*
 borough_plan/*
 .vscode/*
+light_pdf_web_qa_chatbot.egg-info/*
