@@ -10,11 +10,26 @@ jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           lfs: true
-      - name: Push to hub
+      - name: Create orphan snapshot commit (no history)
+        run: |
+          set -euo pipefail
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          # Create a branch with no parent commit, then commit the current working tree.
+          # This prevents pushing full git history to Hugging Face.
+          git checkout --orphan hf-main
+          git rm -rf --cached . || true
+          git add -A -- ':!/.git'
+          git commit -m "Snapshot sync $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      - name: Force-push snapshot to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push https://seanpedrickcase:$HF_TOKEN@huggingface.co/spaces/seanpedrickcase/Light-PDF-Web-QA-Chatbot main
+        run: |
+          set -euo pipefail
+          git push --force "https://seanpedrickcase:${HF_TOKEN}@huggingface.co/spaces/seanpedrickcase/Light-PDF-Web-QA-Chatbot" hf-main:main
