@@ -1,33 +1,50 @@
-from typing import Type, List
-import pandas as pd
-import boto3
 import os
-from tools.config import AWS_REGION, RUN_AWS_FUNCTIONS, QA_CHATBOT_BUCKET
+from typing import List, Type
+
+import boto3
+import pandas as pd
+
+from tools.config import (
+    AWS_DEFAULT_REGION,
+    AWS_REGION,
+    QA_CHATBOT_BUCKET,
+    RUN_AWS_FUNCTIONS,
+    SAVE_LOGS_TO_S3,
+)
 
 PandasDataFrame = Type[pd.DataFrame]
 
+# Prefer explicit AWS_REGION, otherwise fall back to AWS_DEFAULT_REGION
+_effective_aws_region = AWS_REGION or AWS_DEFAULT_REGION
+
 # Get AWS credentials if required
-bucket_name=QA_CHATBOT_BUCKET
+bucket_name = QA_CHATBOT_BUCKET
 
 
 if RUN_AWS_FUNCTIONS == "1":
     try:
-        bucket_name = os.environ['']
-        session = boto3.Session() # profile_name="default"
+        session = boto3.Session()  # profile_name="default"
     except Exception as e:
         print("Failed to start boto3 session due to:", e)
+        session = None
 
     def get_assumed_role_info():
-        sts_endpoint = 'https://sts.' + AWS_REGION + '.amazonaws.com'
-        sts = boto3.client('sts', region_name=AWS_REGION, endpoint_url=sts_endpoint)
+        if not _effective_aws_region:
+            raise ValueError(
+                "AWS region is not set. Set AWS_REGION or AWS_DEFAULT_REGION."
+            )
+        sts_endpoint = "https://sts." + _effective_aws_region + ".amazonaws.com"
+        sts = boto3.client(
+            "sts", region_name=_effective_aws_region, endpoint_url=sts_endpoint
+        )
         response = sts.get_caller_identity()
 
         # Extract ARN of the assumed role
-        assumed_role_arn = response['Arn']
-        
+        assumed_role_arn = response["Arn"]
+
         # Extract the name of the assumed role from the ARN
-        assumed_role_name = assumed_role_arn.split('/')[-1]
-        
+        assumed_role_name = assumed_role_arn.split("/")[-1]
+
         return assumed_role_arn, assumed_role_name
 
     try:
@@ -37,33 +54,37 @@ if RUN_AWS_FUNCTIONS == "1":
         print("Assumed Role Name:", assumed_role_name)
 
     except Exception as e:
-        
+
         print(e)
+
 
 # Download direct from S3 - requires login credentials
 def download_file_from_s3(bucket_name, key, local_file_path):
 
     if RUN_AWS_FUNCTIONS == "1":
 
-        s3 = boto3.client('s3')
+        s3 = boto3.client("s3")
         s3.download_file(bucket_name, key, local_file_path)
         print(f"File downloaded from S3: s3://{bucket_name}/{key} to {local_file_path}")
-                         
+
+
 def download_folder_from_s3(bucket_name, s3_folder, local_folder):
     """
     Download all files from an S3 folder to a local folder.
     """
     if RUN_AWS_FUNCTIONS == "1":
-        s3 = boto3.client('s3')
+        s3 = boto3.client("s3")
 
         # List objects in the specified S3 folder
         response = s3.list_objects_v2(Bucket=bucket_name, Prefix=s3_folder)
 
         # Download each object
-        for obj in response.get('Contents', []):
+        for obj in response.get("Contents", []):
             # Extract object key and construct local file path
-            object_key = obj['Key']
-            local_file_path = os.path.join(local_folder, os.path.relpath(object_key, s3_folder))
+            object_key = obj["Key"]
+            local_file_path = os.path.join(
+                local_folder, os.path.relpath(object_key, s3_folder)
+            )
 
             # Create directories if necessary
             os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
@@ -71,27 +92,32 @@ def download_folder_from_s3(bucket_name, s3_folder, local_folder):
             # Download the object
             try:
                 s3.download_file(bucket_name, object_key, local_file_path)
-                print(f"Downloaded 's3://{bucket_name}/{object_key}' to '{local_file_path}'")
+                print(
+                    f"Downloaded 's3://{bucket_name}/{object_key}' to '{local_file_path}'"
+                )
             except Exception as e:
                 print(f"Error downloading 's3://{bucket_name}/{object_key}':", e)
+
 
 def download_files_from_s3(bucket_name, s3_folder, local_folder, filenames):
     """
     Download specific files from an S3 folder to a local folder.
     """
     if RUN_AWS_FUNCTIONS == "1":
-        s3 = boto3.client('s3')
+        s3 = boto3.client("s3")
 
         print("Trying to download file: ", filenames)
 
-        if filenames == '*':
+        if filenames == "*":
             # List all objects in the S3 folder
             print("Trying to download all files in AWS folder: ", s3_folder)
             response = s3.list_objects_v2(Bucket=bucket_name, Prefix=s3_folder)
 
-            print("Found files in AWS folder: ", response.get('Contents', []))
+            print("Found files in AWS folder: ", response.get("Contents", []))
 
-            filenames = [obj['Key'].split('/')[-1] for obj in response.get('Contents', [])]
+            filenames = [
+                obj["Key"].split("/")[-1] for obj in response.get("Contents", [])
+            ]
 
             print("Found filenames in AWS folder: ", filenames)
 
@@ -105,11 +131,16 @@ def download_files_from_s3(bucket_name, s3_folder, local_folder, filenames):
             # Download the object
             try:
                 s3.download_file(bucket_name, object_key, local_file_path)
-                print(f"Downloaded 's3://{bucket_name}/{object_key}' to '{local_file_path}'")
+                print(
+                    f"Downloaded 's3://{bucket_name}/{object_key}' to '{local_file_path}'"
+                )
             except Exception as e:
                 print(f"Error downloading 's3://{bucket_name}/{object_key}':", e)
 
-def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=bucket_name):
+
+def upload_file_to_s3(
+    local_file_paths: List[str], s3_key: str, s3_bucket: str = bucket_name
+):
     """
     Uploads a file from local machine to Amazon S3.
 
@@ -124,32 +155,39 @@ def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=buck
     final_out_message = []
     final_out_message_str = ""
 
-    if RUN_AWS_FUNCTIONS == "1":
+    if SAVE_LOGS_TO_S3 != "True":
+        return final_out_message_str
 
-        s3_client = boto3.client('s3')
+    if RUN_AWS_FUNCTIONS != "1":
+        return final_out_message_str
 
-        if isinstance(local_file_paths, str):
-            local_file_paths = [local_file_paths]
+    if not s3_bucket:
+        out_message = "S3 upload skipped: QA_CHATBOT_BUCKET is not set."
+        print(out_message)
+        return out_message
 
-        for file in local_file_paths:
-            try:
-                # Get file name off file path
-                file_name = os.path.basename(file)
+    s3_client = boto3.client("s3")
 
-                s3_key_full = s3_key + file_name
-                print("S3 key: ", s3_key_full)
+    if isinstance(local_file_paths, str):
+        local_file_paths = [local_file_paths]
 
-                s3_client.upload_file(file, s3_bucket, s3_key_full)
-                out_message = "File " + file_name + " uploaded successfully!"
-                print(out_message)
-            
-            except Exception as e:
-                out_message = f"Error uploading file(s): {e}"
-                print(out_message)
+    for file in local_file_paths:
+        try:
+            # Get file name off file path
+            file_name = os.path.basename(file)
 
-            final_out_message.append(out_message)
-            final_out_message_str = '\n'.join(final_out_message)
+            s3_key_full = s3_key + file_name
+            print("S3 key: ", s3_key_full)
+
+            s3_client.upload_file(file, s3_bucket, s3_key_full)
+            out_message = "File " + file_name + " uploaded successfully!"
+            print(out_message)
+
+        except Exception as e:
+            out_message = f"Error uploading file(s): {e}"
+            print(out_message)
+
+        final_out_message.append(out_message)
+        final_out_message_str = "\n".join(final_out_message)
 
     return final_out_message_str
-        
-    
