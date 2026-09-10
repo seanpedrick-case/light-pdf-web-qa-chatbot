@@ -13,5 +13,6 @@ config/*
 output/*
 input/*
 borough_plan/*
+old_code/*
 .vscode/*
 light_pdf_web_qa_chatbot.egg-info/*

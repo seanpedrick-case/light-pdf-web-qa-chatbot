@@ -13,6 +13,16 @@ import numpy as np
 from tools.document import Document
 
 
+def _l2_normalize_rows(vectors: np.ndarray) -> np.ndarray:
+    """L2-normalise each row so IndexFlatIP scores are cosine similarities."""
+    vectors = np.asarray(vectors, dtype="float32")
+    if vectors.ndim == 1:
+        vectors = vectors.reshape(1, -1)
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms = np.maximum(norms, 1e-12)
+    return vectors / norms
+
+
 class InMemoryDocstore:
     """Simple in-memory document store."""
 
@@ -61,12 +71,12 @@ class FAISS:
         if not documents:
             raise ValueError("No documents provided")
 
-        # Generate embeddings
+        # Generate embeddings (expected L2-normalised; normalise again as a safeguard)
         texts = [doc.page_content for doc in documents]
         embeddings = embedding.embed_documents(texts)
-        embeddings_np = np.array(embeddings).astype("float32")
+        embeddings_np = _l2_normalize_rows(np.array(embeddings).astype("float32"))
 
-        # Create FAISS index
+        # IndexFlatIP + unit vectors => cosine similarity scores in roughly [-1, 1]
         dimension = embeddings_np.shape[1]
         index = faiss.IndexFlatIP(dimension)
         index.add(embeddings_np)
@@ -94,11 +104,11 @@ class FAISS:
         if self.index is None:
             return []
 
-        # Get query embedding
+        # Get query embedding (L2-normalise so IP == cosine against normalised docs)
         query_embedding = self.embedding_function(query)
-        query_vector = np.array([query_embedding]).astype("float32")
+        query_vector = _l2_normalize_rows(np.array([query_embedding]).astype("float32"))
 
-        # Search
+        # Search — returned scores are cosine similarities when vectors are unit length
         scores, indices = self.index.search(query_vector, k)
 
         results = []

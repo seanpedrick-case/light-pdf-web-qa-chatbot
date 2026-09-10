@@ -63,6 +63,18 @@ def add_folder_to_path(folder_path: str):
         print(f"Folder not found at {folder_path} - not added to PATH")
 
 
+def convert_string_to_boolean(value: str) -> bool:
+    """Convert string to boolean, handling various formats."""
+    if isinstance(value, bool):
+        return value
+    elif value in ["True", "1", "true", "TRUE"]:
+        return True
+    elif value in ["False", "0", "false", "FALSE"]:
+        return False
+    else:
+        raise ValueError(f"Invalid boolean value: {value}")
+
+
 ensure_folder_exists("config/")
 
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
@@ -121,6 +133,43 @@ if AWS_ACCESS_KEY:
 AWS_SECRET_KEY = get_or_create_env_var("AWS_SECRET_KEY", "")
 if AWS_SECRET_KEY:
     print("AWS_SECRET_KEY found in environment variables")
+
+# Bedrock Knowledge Base retrieve_and_generate (bypasses local FAISS RAG when enabled).
+# Requires IAM permissions for bedrock:RetrieveAndGenerate / knowledge-base retrieve,
+# plus access to the foundation model. Credentials follow the same pattern as RUN_AWS_FUNCTIONS.
+USE_BEDROCK_KB = get_or_create_env_var("USE_BEDROCK_KB", "0")
+KNOWLEDGE_BASE_ID = get_or_create_env_var("KNOWLEDGE_BASE_ID", "")
+BEDROCK_MODEL_ID = get_or_create_env_var("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
+GUARDRAIL_ID = get_or_create_env_var("GUARDRAIL_ID", "")
+GUARDRAIL_VERSION = get_or_create_env_var("GUARDRAIL_VERSION", "")
+if USE_BEDROCK_KB == "1":
+    print(
+        "USE_BEDROCK_KB=1: local FAISS retrieval/generation bypassed; "
+        f"KB_ID={KNOWLEDGE_BASE_ID or '(not set)'}, model={BEDROCK_MODEL_ID}"
+    )
+
+# Arize Phoenix / AX tracing for chat retrieve+generate turns (custom OTEL spans).
+# Local Phoenix: ARIZE_TRACING_ENABLED=1, ARIZE_BACKEND=phoenix,
+# PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006 (default).
+ARIZE_TRACING_ENABLED = get_or_create_env_var("ARIZE_TRACING_ENABLED", "0")
+ARIZE_BACKEND = get_or_create_env_var("ARIZE_BACKEND", "phoenix")
+PHOENIX_COLLECTOR_ENDPOINT = get_or_create_env_var(
+    "PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006"
+)
+PHOENIX_PROJECT_NAME = get_or_create_env_var(
+    "PHOENIX_PROJECT_NAME", "light-pdf-qa-chatbot"
+)
+ARIZE_PROJECT_NAME = get_or_create_env_var("ARIZE_PROJECT_NAME", "")
+PHOENIX_API_KEY = get_or_create_env_var("PHOENIX_API_KEY", "")
+ARIZE_SPACE_ID = get_or_create_env_var("ARIZE_SPACE_ID", "")
+ARIZE_API_KEY = get_or_create_env_var("ARIZE_API_KEY", "")
+ARIZE_ENDPOINT = get_or_create_env_var("ARIZE_ENDPOINT", "europe")
+if ARIZE_TRACING_ENABLED in {"1", "true", "True", "yes", "on"}:
+    print(
+        f"ARIZE_TRACING_ENABLED: backend={ARIZE_BACKEND}, "
+        f"phoenix_endpoint={PHOENIX_COLLECTOR_ENDPOINT}, "
+        f"project={PHOENIX_PROJECT_NAME or ARIZE_PROJECT_NAME or 'light-pdf-qa-chatbot'}"
+    )
 
 QA_CHATBOT_BUCKET = get_or_create_env_var("QA_CHATBOT_BUCKET", "")
 
@@ -211,10 +260,23 @@ MAX_TIME_VALUE = get_or_create_env_var("MAX_TIME_VALUE", "999999")
 # APP RUN CONFIG
 ###
 
+FILL_SCREEN_WIDTH = convert_string_to_boolean(
+    get_or_create_env_var("FILL_SCREEN_WIDTH", "False")
+)
+
 SMALL_MODEL_NAME = get_or_create_env_var("SMALL_MODEL_NAME", "Qwen 3.5 0.8B")
 
 SMALL_MODEL_REPO_ID = get_or_create_env_var(
     "SMALL_MODEL_REPO_ID", "unsloth/Qwen3.5-0.8B"
+)
+
+# Local Hugging Face generate: abandon if no first token within this many seconds.
+GENERATION_FIRST_TOKEN_TIMEOUT = float(
+    get_or_create_env_var("GENERATION_FIRST_TOKEN_TIMEOUT", "45")
+)
+# Subsequent tokens: max wait between streamed chunks before aborting.
+GENERATION_TOKEN_TIMEOUT = float(
+    get_or_create_env_var("GENERATION_TOKEN_TIMEOUT", "120")
 )
 
 LOAD_LARGE_MODEL = get_or_create_env_var("LOAD_LARGE_MODEL", "0")

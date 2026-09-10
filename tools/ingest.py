@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 from tools.document import Document
 from tools.embeddings import HuggingFaceEmbeddings
-from tools.faiss_store import FAISS, InMemoryDocstore
+from tools.faiss_store import FAISS, InMemoryDocstore, _l2_normalize_rows
 from tools.text_splitter import RecursiveCharacterTextSplitter
 
 
@@ -450,6 +450,7 @@ def pdf_text_to_docs(text, chunk_size: int = chunk_size) -> List[Document]:
 
         if doc.page_content == "":
             sections = [""]
+            section_metas = [{}]
 
         else:
             text_splitter = RecursiveCharacterTextSplitter(
@@ -458,19 +459,22 @@ def pdf_text_to_docs(text, chunk_size: int = chunk_size) -> List[Document]:
                 chunk_overlap=chunk_overlap,
                 add_start_index=True,
             )
-            sections = text_splitter.split_text(doc.page_content)
+            # Use create_documents so start_index / start_line / end_line are set.
+            section_docs = text_splitter.create_documents([doc.page_content])
+            sections = [s.page_content for s in section_docs]
+            section_metas = [s.metadata for s in section_docs]
 
         for i, section in enumerate(sections):
-            doc = Document(
-                page_content=section,
-                metadata={
-                    "page": doc.metadata["page"],
-                    "section": i,
-                    "page_section": f"{doc.metadata['page']}-{i}",
-                },
-            )
-
-            doc_sections.append(doc)
+            meta = {
+                "page": doc.metadata["page"],
+                "section": i,
+                "page_section": f"{doc.metadata['page']}-{i}",
+            }
+            if i < len(section_metas):
+                for key in ("start_index", "start_line", "end_line"):
+                    if key in section_metas[i]:
+                        meta[key] = section_metas[i][key]
+            doc_sections.append(Document(page_content=section, metadata=meta))
 
     return doc_sections, page_docs  # , parent_doc
 
@@ -726,17 +730,11 @@ def embed_faiss_save_to_zip(
     print("\nEmbedding generation complete. Building FAISS index...")
 
     # 2. Build the Raw FAISS Index
-    # Ensure all embeddings are numpy float32, which FAISS expects.
-    # BGE models (like bge-base-en-v1.5) typically produce L2-normalized embeddings,
-    # which are ideal for Inner Product (IP) similarity, equivalent to cosine similarity.
-    # If your model *does not* output normalized vectors and you want cosine similarity,
-    # you must normalize them here: `np.array([v / np.linalg.norm(v) for v in vectors]).astype("float32")`
-    # Otherwise, you might use IndexFlatL2 for Euclidean distance.
-    # For common embedding models and cosine similarity, `IndexFlatIP` with pre-normalized vectors is standard.
-    embeddings_np = np.array(vectors).astype("float32")
+    # L2-normalise so IndexFlatIP scores are cosine similarities (~[-1, 1]).
+    embeddings_np = _l2_normalize_rows(np.array(vectors).astype("float32"))
     embedding_dimension = embeddings_np.shape[1]
 
-    # Create a raw FAISS index (e.g., IndexFlatIP for cosine similarity)
+    # Create a raw FAISS index (IP on unit vectors == cosine similarity)
     raw_faiss_index = faiss.IndexFlatIP(embedding_dimension)
     raw_faiss_index.add(embeddings_np)  # Add all vectors to the raw FAISS index
 

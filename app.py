@@ -11,6 +11,8 @@ from tools.auth import authenticate_user
 from tools.aws_functions import upload_file_to_s3
 from tools.config import (
     ACCESS_LOGS_FOLDER,
+    ARIZE_TRACING_ENABLED,
+    BEDROCK_MODEL_ID,
     COGNITO_AUTH,
     DEFAULT_CONCURRENCY_LIMIT,
     DEFAULT_DATA_SOURCE,
@@ -20,11 +22,13 @@ from tools.config import (
     DEFAULT_MODEL_PROVIDER,
     EMBEDDINGS_MODEL_NAME,
     FEEDBACK_LOGS_FOLDER,
+    FILL_SCREEN_WIDTH,
     GEMINI_API_KEY,
     GRADIO_SERVER_PORT,
     HF_TOKEN,
     HOST_NAME,
     INPUT_FOLDER,
+    KNOWLEDGE_BASE_ID,
     LARGE_MODEL_GGUF_FILE,
     LARGE_MODEL_NAME,
     LARGE_MODEL_REPO_ID,
@@ -34,11 +38,14 @@ from tools.config import (
     MAX_QUEUE_SIZE,
     MODEL_PROVIDER_CHOICES,
     OUTPUT_FOLDER,
+    PHOENIX_COLLECTOR_ENDPOINT,
+    PHOENIX_PROJECT_NAME,
     PROVIDER_MODELS,
     ROOT_PATH,
     SMALL_MODEL_NAME,
     SMALL_MODEL_REPO_ID,
     USAGE_LOGS_FOLDER,
+    USE_BEDROCK_KB,
 )
 from tools.faiss_store import FAISS
 from tools.helper_functions import (
@@ -46,6 +53,9 @@ from tools.helper_functions import (
 )
 from tools.ingest import embed_faiss_save_to_zip, get_faiss_store, load_embeddings_model
 from tools.model_load import context_length, cpu_config, gpu_config, torch_device
+from tools.phoenix_tracing import setup_phoenix_tracing
+
+setup_phoenix_tracing()
 
 PandasDataFrame = Type[pd.DataFrame]
 
@@ -78,12 +88,16 @@ def update_models_for_provider(provider: str):
 ###
 # Load preset embeddings, vectorstore, and model
 ###
-# Load in default embeddings and embeddings model name
-embeddings_model = load_embeddings_model(EMBEDDINGS_MODEL_NAME)
-# vectorstore = get_faiss_store(zip_file_path=DEFAULT_EMBEDDINGS_LOCATION,embeddings_model=embeddings_model)#globals()["embeddings"])
-vectorstore = None
-
-chatf.embeddings = embeddings_model
+# Skip local embeddings when Bedrock KB owns retrieval+generation.
+if USE_BEDROCK_KB == "1":
+    embeddings_model = None
+    vectorstore = None
+    chatf.embeddings = None
+else:
+    embeddings_model = load_embeddings_model(EMBEDDINGS_MODEL_NAME)
+    # vectorstore = get_faiss_store(zip_file_path=DEFAULT_EMBEDDINGS_LOCATION,embeddings_model=embeddings_model)#globals()["embeddings"])
+    vectorstore = None
+    chatf.embeddings = embeddings_model
 # chatf.vectorstore = vectorstore
 
 
@@ -211,7 +225,12 @@ def load_model(
 # RUN UI
 ###
 
-app = gr.Blocks(fill_width=False)  # css=".gradio-container {background-color: black}")
+app = blocks = gr.Blocks(
+    analytics_enabled=False,
+    title="Light PDF / web page QA chatbot App",
+    delete_cache=(14400, 14400),  # Temporary file cache deleted every 4 hours
+    fill_width=FILL_SCREEN_WIDTH,
+)  # css=".gradio-container {background-color: black}")
 
 with app:
     model_type = SMALL_MODEL_NAME
@@ -250,6 +269,7 @@ with app:
 
     chat_history_state = gr.State()
     instruction_prompt_out = gr.State()
+    bedrock_session_id = gr.State("")
 
     session_hash_state = gr.State()
     output_folder_textbox = gr.Textbox(value=OUTPUT_FOLDER, visible=False)
@@ -270,15 +290,40 @@ with app:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")
 
-    gr.Markdown(
-        f"""Chat with PDFs, web pages or data files (.csv / .xlsx). The default is a small model ({SMALL_MODEL_NAME}), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. Go to Advanced settings to change model to e.g. a choice of Gemini models that are available on [their very generous free tier](https://ai.google.dev/gemini-api/docs/pricing) (needs an API key), or AWS Bedrock/larger local models if activated.\n\nBy default '[{DEFAULT_DATA_SOURCE_NAME}]({DEFAULT_DATA_SOURCE})' is loaded as a data source. If you want to query another data source, please upload it on the 'Change data source' tab. If switching topic, please click the 'Clear chat' button. 'Stop generating' will halt the language model during its response.\n\n**Caution: On Hugging Face, this is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it!** Also, please note that AI chatbots may give incomplete or incorrect information, so please use with care and ensure that you verify any outputs before further use."""
-    )
+    if USE_BEDROCK_KB == "1":
+        kb_id_display = KNOWLEDGE_BASE_ID or "(not set — set KNOWLEDGE_BASE_ID)"
+        gr.Markdown(
+            f"""**AWS Bedrock Knowledge Base mode is enabled** (`USE_BEDROCK_KB=1`).
 
-    with gr.Row():
-        current_source = gr.Textbox(
-            label="Current data source(s)", value=DEFAULT_DATA_SOURCE, scale=10
+Local FAISS retrieval, local model generation, Gemini, and Bedrock Converse are **bypassed**. Questions are answered by AWS Bedrock `retrieve_and_generate` using knowledge base `{kb_id_display}` and model `{BEDROCK_MODEL_ID}`.
+
+The **Change data source** tab and **Advanced settings** model dropdown do not affect answers in this mode. Click **Clear chat** to start a new Bedrock session. AI chatbots may give incomplete or incorrect information — verify outputs before use."""
         )
-        current_model = gr.Textbox(label="Current model", value=model_type, scale=3)
+        with gr.Row():
+            current_source = gr.Textbox(
+                label="Current data source(s)",
+                value=f"AWS Bedrock Knowledge Base: {kb_id_display}",
+                scale=10,
+            )
+            current_model = gr.Textbox(
+                label="Current model",
+                value=f"AWS Bedrock KB ({BEDROCK_MODEL_ID})",
+                scale=3,
+            )
+    else:
+        gr.Markdown(
+            f"""Chat with PDFs, web pages or data files (.csv / .xlsx). The default is a small model ({SMALL_MODEL_NAME}), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. Go to Advanced settings to change model to e.g. a choice of Gemini models that are available on [their very generous free tier](https://ai.google.dev/gemini-api/docs/pricing) (needs an API key), or AWS Bedrock/larger local models if activated.\n\nBy default '[{DEFAULT_DATA_SOURCE_NAME}]({DEFAULT_DATA_SOURCE})' is loaded as a data source. If you want to query another data source, please upload it on the 'Change data source' tab. If switching topic, please click the 'Clear chat' button. 'Stop generating' will halt the language model during its response.\n\n**Caution: On Hugging Face, this is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it!** Also, please note that AI chatbots may give incomplete or incorrect information, so please use with care and ensure that you verify any outputs before further use."""
+        )
+        with gr.Row():
+            current_source = gr.Textbox(
+                label="Current data source(s)", value=DEFAULT_DATA_SOURCE, scale=10
+            )
+            current_model = gr.Textbox(label="Current model", value=model_type, scale=3)
+
+    if ARIZE_TRACING_ENABLED in {"1", "true", "True", "yes", "on"}:
+        gr.Markdown(
+            f"**Arize Phoenix tracing is enabled.** Chat retrieve/generate spans are sent to `{PHOENIX_COLLECTOR_ENDPOINT}` (project `{PHOENIX_PROJECT_NAME}`). Multi-turn turns share Gradio `session.id`."
+        )
 
     with gr.Tab("Chatbot"):
 
@@ -301,9 +346,14 @@ with app:
                     max_height=500,
                 )  # , height=chat_height
 
-        gr.Markdown(
-            "Make sure that your questions are as specific as possible to allow the search engine to find the most relevant text to your query."
-        )
+        if USE_BEDROCK_KB == "1":
+            gr.Markdown(
+                "Answers come from the AWS Bedrock Knowledge Base (local search and models are bypassed). Ask specific questions for better retrieval."
+            )
+        else:
+            gr.Markdown(
+                "Make sure that your questions are as specific as possible to allow the search engine to find the most relevant text to your query."
+            )
         with gr.Row():
             message = gr.Textbox(
                 label="Enter your question here",
@@ -314,7 +364,11 @@ with app:
             clear = gr.Button(value="Clear chat", variant="secondary", scale=1)
             stop = gr.Button(value="Stop generating", variant="stop", scale=1)
 
-        examples_set = gr.Radio(label="Example questions", choices=default_examples_set)
+        examples_set = gr.Radio(
+            label="Example questions",
+            choices=default_examples_set,
+            visible=USE_BEDROCK_KB != "1",
+        )
 
         current_topic = gr.Textbox(
             label="Feature currently disabled - Keywords related to current conversation topic.",
@@ -323,6 +377,10 @@ with app:
         )
 
     with gr.Tab("Change data source"):
+        if USE_BEDROCK_KB == "1":
+            gr.Markdown(
+                "**Not used in AWS Bedrock Knowledge Base mode.** Local uploads and FAISS indexing are bypassed; the remote knowledge base is the sole data source."
+            )
         with gr.Accordion("PDF file", open=False):
             in_pdf = gr.File(
                 label="Upload pdf", file_count="multiple", file_types=[".pdf"]
@@ -355,6 +413,10 @@ with app:
             file_out_box = gr.File(file_count="single", file_types=[".zip"])
 
     with gr.Tab("Advanced settings - change model/model options"):
+        if USE_BEDROCK_KB == "1":
+            gr.Markdown(
+                f"**Not used for generation in AWS Bedrock Knowledge Base mode.** Answers always use `{BEDROCK_MODEL_ID}` via Bedrock `retrieve_and_generate`. Changing provider/model below has no effect until `USE_BEDROCK_KB` is turned off."
+            )
         out_passages = gr.Slider(
             minimum=1,
             value=2,
@@ -451,12 +513,16 @@ with app:
                 model_type_state,
                 out_passages,
                 in_api_key,
+                bedrock_session_id,
+                session_hash_textbox,
             ],
             outputs=[
                 chat_history_state,
                 sources,
                 instruction_prompt_out,
                 relevant_query_state,
+                bedrock_session_id,
+                current_topic,
             ],
             queue=False,
             api_name="retrieval",
@@ -477,6 +543,8 @@ with app:
                 relevant_query_state,
                 chat_history_state,
                 in_api_key,
+                session_hash_textbox,
+                message,
             ],
             outputs=chatbot,
         )
@@ -504,12 +572,16 @@ with app:
                 model_type_state,
                 out_passages,
                 in_api_key,
+                bedrock_session_id,
+                session_hash_textbox,
             ],
             outputs=[
                 chat_history_state,
                 sources,
                 instruction_prompt_out,
                 relevant_query_state,
+                bedrock_session_id,
+                current_topic,
             ],
             queue=False,
         )
@@ -529,6 +601,8 @@ with app:
                 relevant_query_state,
                 chat_history_state,
                 in_api_key,
+                session_hash_textbox,
+                message,
             ],
             chatbot,
         )
@@ -543,16 +617,32 @@ with app:
         lambda: chatf.restore_interactivity(), None, [message, submit], queue=False
     )
 
-    # Stop box
+    # Stop box — cancel Gradio jobs and re-enable controls (cancel alone skipped restore).
     stop.click(
-        fn=None, inputs=None, outputs=None, cancels=[response_click, response_enter]
+        fn=chatf.request_generation_cancel,
+        inputs=None,
+        outputs=[message, submit],
+        cancels=[response_click, response_enter],
+        queue=False,
     )
 
     # Clear box
     clear.click(
         chatf.clear_chat,
-        inputs=[chat_history_state, sources, message, current_topic],
-        outputs=[chat_history_state, sources, message, current_topic],
+        inputs=[
+            chat_history_state,
+            sources,
+            message,
+            current_topic,
+            bedrock_session_id,
+        ],
+        outputs=[
+            chat_history_state,
+            sources,
+            message,
+            current_topic,
+            bedrock_session_id,
+        ],
     )
     clear.click(lambda: None, None, chatbot, queue=False)
 
@@ -629,30 +719,55 @@ with app:
     # LOAD MODEL PAGE
     ###
 
-    change_model_button.click(
-        fn=chatf.turn_off_interactivity,
-        inputs=None,
-        outputs=[message, submit],
-        queue=False,
-    ).success(
-        fn=load_model,
-        inputs=[model_choice, gpu_layer_choice],
-        outputs=[model_type_state, load_text, current_model],
-    ).success(
-        lambda: chatf.restore_interactivity(), None, [message, submit], queue=False
-    ).success(
-        chatf.clear_chat,
-        inputs=[chat_history_state, sources, message, current_topic],
-        outputs=[chat_history_state, sources, message, current_topic],
-    ).success(
-        lambda: None, None, chatbot, queue=False
+    change_model_chain = (
+        change_model_button.click(
+            fn=chatf.turn_off_interactivity,
+            inputs=None,
+            outputs=[message, submit],
+            queue=False,
+        )
+        .success(
+            fn=load_model,
+            inputs=[model_choice, gpu_layer_choice],
+            outputs=[model_type_state, load_text, current_model],
+        )
+        .success(
+            lambda: chatf.restore_interactivity(), None, [message, submit], queue=False
+        )
+        .success(
+            chatf.clear_chat,
+            inputs=[
+                chat_history_state,
+                sources,
+                message,
+                current_topic,
+                bedrock_session_id,
+            ],
+            outputs=[
+                chat_history_state,
+                sources,
+                message,
+                current_topic,
+                bedrock_session_id,
+            ],
+        )
+        .success(lambda: None, None, chatbot, queue=False)
     )
+    if USE_BEDROCK_KB == "1":
+        change_model_chain.success(
+            lambda: (
+                f"AWS Bedrock Knowledge Base: {KNOWLEDGE_BASE_ID or '(not set — set KNOWLEDGE_BASE_ID)'}",
+                f"AWS Bedrock KB ({BEDROCK_MODEL_ID})",
+            ),
+            inputs=None,
+            outputs=[current_source, current_model],
+        )
 
     ###
     # LOGGING AND ON APP LOAD FUNCTIONS
     ###
     # Load in default model and embeddings for each user
-    app.load(
+    app_load = app.load(
         get_connection_params,
         inputs=None,
         outputs=[
@@ -671,11 +786,22 @@ with app:
             torch_device_state,
         ],
         outputs=[model_type_state, load_text, current_model],
-    ).success(
-        get_faiss_store,
-        inputs=[default_embeddings_store_text, embeddings_model_object_state],
-        outputs=[vectorstore_state],
     )
+    if USE_BEDROCK_KB == "1":
+        app_load = app_load.success(
+            lambda: (
+                f"AWS Bedrock Knowledge Base: {KNOWLEDGE_BASE_ID or '(not set — set KNOWLEDGE_BASE_ID)'}",
+                f"AWS Bedrock KB ({BEDROCK_MODEL_ID})",
+            ),
+            inputs=None,
+            outputs=[current_source, current_model],
+        )
+    if USE_BEDROCK_KB != "1":
+        app_load.success(
+            get_faiss_store,
+            inputs=[default_embeddings_store_text, embeddings_model_object_state],
+            outputs=[vectorstore_state],
+        )
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
     access_callback = gr.CSVLogger()
