@@ -3,8 +3,9 @@ import os
 import re
 import time
 from itertools import compress
-from threading import Thread
-from typing import Dict, List, Tuple, Type
+from threading import Event, Thread
+from typing import Dict, List, Optional, Tuple, Type
+from queue import Empty
 
 # For Name Entity Recognition model
 # from span_marker import SpanMarkerModel # Not currently used
@@ -24,16 +25,20 @@ from keybert import KeyBERT
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import RegexpTokenizer
-from transformers import TextIteratorStreamer, pipeline
+from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer, pipeline
 
 from tools.config import (
     AWS_DEFAULT_REGION,
     AWS_MODELS,
+    BEDROCK_MODEL_ID,
     FEEDBACK_LOGS_FOLDER,
     GEMINI_API_KEY,
+    GENERATION_FIRST_TOKEN_TIMEOUT,
+    GENERATION_TOKEN_TIMEOUT,
     LARGE_MODEL_NAME,
     RUN_AWS_FUNCTIONS,
     SMALL_MODEL_NAME,
+    USE_BEDROCK_KB,
 )
 from tools.document import Document
 from tools.embeddings import HuggingFaceEmbeddings
@@ -52,12 +57,73 @@ from tools.model_load import (
 from tools.prompts import (
     instruction_prompt_gemma,
     instruction_prompt_phi3,
+    instruction_prompt_qwen,
     instruction_prompt_template_gemini_aws,
 )
-from tools.text_splitter import RecursiveCharacterTextSplitter
 
 model_object = []  # Define empty list for model functions to run
 tokenizer = []  # Define empty list for model functions to run
+
+# Shared cancel flag for local Hugging Face generate (Stop button / timeouts).
+_generation_cancel = Event()
+
+
+class _CancelOnEvent(StoppingCriteria):
+    """Abort model.generate when Stop is clicked or a timeout invalidates the run."""
+
+    def __call__(self, input_ids, scores, **kwargs):
+        return _generation_cancel.is_set()
+
+
+def begin_generation_run() -> None:
+    _generation_cancel.clear()
+
+
+def request_generation_cancel():
+    """Cancel active local generation and re-enable the chat controls."""
+    _generation_cancel.set()
+    print("Generation cancel requested (Stop / timeout).")
+    return restore_interactivity()
+
+
+def _iter_text_streamer(
+    streamer: TextIteratorStreamer,
+    *,
+    first_token_timeout: float,
+    token_timeout: float,
+    poll_interval: float = 0.5,
+):
+    """Yield streamer chunks with first-token / between-token deadlines.
+
+    Polls in short intervals so Stop can abort without waiting for the full
+    timeout window (a single long ``queue.get`` would ignore cancel until then).
+    """
+    got_first = False
+    deadline = time.monotonic() + first_token_timeout
+    while True:
+        if _generation_cancel.is_set():
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            kind = "first token" if not got_first else "next token"
+            limit = first_token_timeout if not got_first else token_timeout
+            raise TimeoutError(
+                f"Timed out waiting for {kind} after {limit:.0f}s. "
+                "The previous request was cancelled — please try again."
+            )
+        try:
+            value = streamer.text_queue.get(timeout=min(poll_interval, remaining))
+        except Empty:
+            continue
+        if value == streamer.stop_signal:
+            break
+        if value:
+            got_first = True
+        # Reset the between-token clock after each chunk (including blanks).
+        deadline = time.monotonic() + (
+            token_timeout if got_first else first_token_timeout
+        )
+        yield value
 
 
 # ResponseObject class for AWS Bedrock calls
@@ -88,9 +154,8 @@ source_texts = (
 )
 
 ## Highlight text constants
-hlt_chunk_size = 12
-hlt_strat = [" ", ". ", "! ", "? ", ": ", "\n\n", "\n", ", "]
-hlt_overlap = 4
+# Minimum consecutive complete words that must match the reply before highlighting
+hlt_min_match_words = 5
 
 ## Initialise NER model ##
 ner_model = (
@@ -104,14 +169,69 @@ kw_model = pipeline(
 )
 
 
+def strip_model_artifacts(text: str, *, finalize: bool = False) -> str:
+    """Remove Qwen-style thinking blocks and leaked role prefixes from model output."""
+    if not text:
+        return ""
+
+    cleaned = str(text)
+    # Complete thinking / reasoning blocks (including empty ones).
+    cleaned = re.sub(
+        r"<think\b[^>]*>.*?</think>",
+        "",
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"<thinking\b[^>]*>.*?</thinking>",
+        "",
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    # Hide an unclosed thinking block while tokens are still streaming.
+    cleaned = re.sub(
+        r"<think\b[^>]*>.*\Z",
+        "",
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"<thinking\b[^>]*>.*\Z",
+        "",
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    # Orphan closing tags and common role leaks from chat templates.
+    cleaned = re.sub(r"</think>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"</thinking>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"^\s*(assistant|model)\s*\n+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"^\s*(assistant|model)\s*[:\-]\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+    if finalize:
+        cleaned = cleaned.strip()
+    return cleaned
+
+
 def base_prompt_templates(model_type: str = SMALL_MODEL_NAME):
 
     # Simple string template for content
     CONTENT_PROMPT_TEMPLATE = "{page_content}\n\n"
 
     # The main prompt:
-
-    if model_type == SMALL_MODEL_NAME:
+    model_l = (model_type or "").lower()
+    if "qwen" in model_l:
+        INSTRUCTION_PROMPT_TEMPLATE = instruction_prompt_qwen
+    elif model_type == SMALL_MODEL_NAME:
         INSTRUCTION_PROMPT_TEMPLATE = instruction_prompt_gemma
     elif model_type == LARGE_MODEL_NAME:
         INSTRUCTION_PROMPT_TEMPLATE = instruction_prompt_phi3
@@ -121,11 +241,170 @@ def base_prompt_templates(model_type: str = SMALL_MODEL_NAME):
     return INSTRUCTION_PROMPT_TEMPLATE, CONTENT_PROMPT_TEMPLATE
 
 
-def write_out_metadata_as_string(metadata_in: str):
-    metadata_string = [
-        f"{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}"
-        for d in metadata_in
-    ]  # ['metadata']
+# Metadata keys useful for retrieval internals but noisy in the sources panel.
+_META_SKIP_KEYS = {"page_section", "end_line"}
+_META_DISPLAY_LABELS = {
+    "start_line": "paragraphs",
+    "page": "page",
+    "section": "section",
+    "source": "source",
+    "date": "date",
+    "row": "row",
+    "row_section": "row section",
+}
+
+
+def _metadata_value_is_empty(value) -> bool:
+    if value is None:
+        return True
+    text = str(value).strip()
+    if not text:
+        return True
+    # Bad merges of empty values can leave "to" / "–" alone.
+    if text in {"to", "-", "–", "to to"}:
+        return True
+    if re.fullmatch(r"to(\s+to)*", text):
+        return True
+    return False
+
+
+def _parse_line_bound(value) -> Optional[int]:
+    """Parse a start/end line value that may be int or '3 to 8'."""
+    if value is None:
+        return None
+    text = re.sub(r"\s+to\s+", "–", str(value).strip())
+    if "–" in text:
+        text = text.split("–", 1)[0].strip()
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        return None
+
+
+def _source_uses_paragraph_breaks(source: str) -> bool:
+    """HTML extracts join <p> tags with newlines — those are paragraphs, not editor lines."""
+    source = (source or "").lower()
+    return (
+        source.startswith("http://")
+        or source.startswith("https://")
+        or source.endswith(".html")
+        or source.endswith(".htm")
+    )
+
+
+def enrich_location_metadata_for_display(metadata: dict, page_content: str) -> dict:
+    """Correct location labels using the passage text actually shown.
+
+    Chunking is character-based, so a long HTML <p> can still be start_line==end_line
+    even when the visible passage is large. Recompute the span from content newlines
+    and fall back to character offsets when the passage stays on one paragraph break.
+    """
+    meta = dict(metadata or {})
+    content = page_content or ""
+    start = _parse_line_bound(meta.get("start_line"))
+    end_meta = _parse_line_bound(meta.get("end_line"))
+    content_breaks = content.count("\n")
+
+    if start is not None:
+        end = start + content_breaks
+        if end_meta is not None:
+            end = max(end, end_meta)
+        meta["start_line"] = f"{start} to {end}" if end > start else start
+
+    # Long single-break passages: keep character span so users see extent.
+    if (
+        content_breaks == 0
+        and len(content) > 160
+        and meta.get("start_index") is not None
+    ):
+        meta["_show_char_span"] = True
+    return meta
+
+
+def _format_line_range(value, *, unit: str = "paragraph") -> Optional[str]:
+    """Format start_line metadata (possibly '12 to 48') for display."""
+    text = re.sub(r"\s+to\s+", "–", str(value).strip())
+    singular, plural = unit, unit + "s"
+    if "–" in text:
+        left, _, right = text.partition("–")
+        left, right = left.strip(), right.strip()
+        if left == right:
+            return f"{singular}: {left}"
+        return f"{plural}: {left}–{right}"
+    return f"{singular}: {text}"
+
+
+def _format_char_span(value) -> Optional[str]:
+    text = re.sub(r"\s+to\s+", "–", str(value).strip())
+    if _metadata_value_is_empty(text):
+        return None
+    if "–" in text:
+        left, _, right = text.partition("–")
+        left, right = left.strip(), right.strip()
+        if left == right:
+            return f"character offset: {left}"
+        return f"character range: {left}–{right}"
+    return f"character offset: {text}"
+
+
+def _format_metadata_item(
+    key: str, value, *, unit: str = "paragraph", show_char_span: bool = False
+) -> Optional[str]:
+    """Return a single 'label: value' fragment, or None to omit."""
+    if key in {"page_section", "end_line", "_show_char_span"}:
+        return None
+    if key == "start_index" and not show_char_span:
+        return None
+    if _metadata_value_is_empty(value) and key != "start_index":
+        return None
+
+    text = str(value).strip() if value is not None else ""
+
+    if key == "start_line":
+        return _format_line_range(text, unit=unit)
+
+    if key == "start_index":
+        return _format_char_span(text)
+
+    # Empty date joined as " to 12 March..." or "12 March to "
+    if key == "date":
+        text = re.sub(r"^\s*to\s+", "", text)
+        text = re.sub(r"\s+to\s*$", "", text)
+        text = re.sub(r"\s+to\s+", "–", text)
+        if _metadata_value_is_empty(text):
+            return None
+
+    label = _META_DISPLAY_LABELS.get(key, key)
+    return f"{label}: {text}"
+
+
+def write_out_metadata_as_string(metadata_in, page_contents=None):
+    """Format passage metadata for the sources panel.
+
+    ``page_contents`` (optional, same length as metadata_in) is used to correct
+    paragraph/line spans from the text actually displayed.
+    """
+    metadata_string = []
+    for i, d in enumerate(metadata_in):
+        if not isinstance(d, dict):
+            continue
+        content = ""
+        if page_contents is not None and i < len(page_contents):
+            content = page_contents[i] or ""
+        d = enrich_location_metadata_for_display(d, content)
+
+        source = str(d.get("source") or d.get("meta_url") or "")
+        unit = "paragraph" if _source_uses_paragraph_breaks(source) else "line"
+        show_char = bool(d.get("_show_char_span")) or (
+            "start_line" not in d and "start_index" in d
+        )
+
+        parts = []
+        for k, v in d.items():
+            formatted = _format_metadata_item(k, v, unit=unit, show_char_span=show_char)
+            if formatted:
+                parts.append(formatted)
+        metadata_string.append("  ".join(parts))
     return metadata_string
 
 
@@ -155,10 +434,11 @@ def generate_expanded_prompt(
         total_output_passage_chunks_size (int, optional): Number of neighboring chunks to expand for context. Defaults to 5.
 
     Returns:
-        tuple: (instruction_prompt_out, sources_docs_content_string, new_question_kworded)
+        tuple: (instruction_prompt_out, sources_docs_content_string, new_question_kworded, scored_passages)
             instruction_prompt_out (str): The fully formatted instruction prompt for the model.
             sources_docs_content_string (str): The formatted string of source passages and metadata for user display.
             new_question_kworded (str): The (possibly keyword-adapted) user question.
+            scored_passages (list[dict]): Winning passages with text, score, and source for Phoenix.
     """
 
     question = inputs["question"]
@@ -174,7 +454,9 @@ def generate_expanded_prompt(
             embeddings_model,
             k_val=25,
             out_passages=out_passages,
-            vec_score_cut_off=1,
+            # Cosine similarity after L2-normalisation is roughly in [-1, 1]; keep
+            # positively similar hits (old cut-off of 1 filtered almost everything).
+            vec_score_cut_off=0.0,
             vec_weight=1,
             bm25_weight=1,
             svm_weight=1,
@@ -185,9 +467,29 @@ def generate_expanded_prompt(
         docs_keep_as_doc = []
         docs_keep_out = []
 
+    scored_passages: list[dict] = []
+    for item in docs_keep_out or []:
+        try:
+            doc, score = item[0], float(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        scored_passages.append(
+            {
+                "text": getattr(doc, "page_content", "") or "",
+                "score": score,
+                "source": (getattr(doc, "metadata", None) or {}).get("source", ""),
+                "metadata": getattr(doc, "metadata", None) or {},
+            }
+        )
+
     if (not docs_keep_as_doc) | (doc_df.empty):
         sorry_prompt = """Respond 'Sorry, there is no relevant information to answer this question.'"""
-        return sorry_prompt, "No relevant sources found.", new_question_kworded
+        return (
+            sorry_prompt,
+            "No relevant sources found.",
+            new_question_kworded,
+            scored_passages,
+        )
 
     # Expand the found passages to the neighbouring context
     if "meta_url" in doc_df.columns:
@@ -202,9 +504,11 @@ def generate_expanded_prompt(
         )
 
     # Build up sources content to add to user display
+    # Use passage text to correct paragraph/line spans (HTML <p> breaks != editor lines).
+    page_contents = doc_df["page_content"].tolist()
     doc_df["meta_clean"] = write_out_metadata_as_string(
-        doc_df["metadata"]
-    )  # [f"<b>{'  '.join(f'{k}: {v}' for k, v in d.items() if k != 'page_section')}</b>" for d in doc_df['metadata']]
+        doc_df["metadata"], page_contents=page_contents
+    )
 
     # Remove meta text from the page content if it already exists there
     doc_df["page_content_no_meta"] = doc_df.apply(
@@ -230,7 +534,12 @@ def generate_expanded_prompt(
         "{question}", new_question_kworded
     ).replace("{summaries}", docs_content_string)
 
-    return instruction_prompt_out, sources_docs_content_string, new_question_kworded
+    return (
+        instruction_prompt_out,
+        sources_docs_content_string,
+        new_question_kworded,
+        scored_passages,
+    )
 
 
 def create_full_prompt(
@@ -242,6 +551,8 @@ def create_full_prompt(
     model_type: str,
     out_passages: list[str],
     api_key: str = "",
+    bedrock_session_id: str = "",
+    session_hash: str = "",
     relevant_flag: bool = True,
 ):
 
@@ -256,9 +567,8 @@ def create_full_prompt(
     print("\n==== date/time: " + str(datetime.datetime.now()) + " ====")
 
     history = history or []
-
-    # Create instruction prompt
-    instruction_prompt, content_prompt = base_prompt_templates(model_type=model_type)
+    topic_out = extracted_memory or ""
+    session_out = bedrock_session_id or ""
 
     if not user_input.strip():
         user_input = "No user input found"
@@ -266,8 +576,105 @@ def create_full_prompt(
     else:
         relevant_flag = True
 
-    instruction_prompt_out, docs_content_string, new_question_kworded = (
-        generate_expanded_prompt(
+    from tools.phoenix_tracing import (
+        chat_span,
+        set_retrieval_documents,
+        set_span_attr,
+        set_span_output,
+    )
+
+    backend = "bedrock_kb" if USE_BEDROCK_KB == "1" else "local_faiss"
+    traced_model = (
+        f"AWS Bedrock KB ({BEDROCK_MODEL_ID})" if USE_BEDROCK_KB == "1" else model_type
+    )
+    with chat_span(
+        "chat.retrieve",
+        kind="RETRIEVER" if backend == "local_faiss" else "CHAIN",
+        session_hash=session_hash,
+        input_value=user_input,
+        attributes={
+            "qa.backend": backend,
+            "qa.model_type": traced_model,
+            "qa.user_query": user_input,
+            "qa.bedrock_session_id": session_out or None,
+        },
+    ) as span:
+        # Bedrock Knowledge Base: retrieve + generate in one call; skip local FAISS RAG.
+        if USE_BEDROCK_KB == "1":
+            from tools.bedrock_kb import get_rag_response
+
+            if not relevant_flag:
+                history.append(
+                    {
+                        "metadata": None,
+                        "options": None,
+                        "role": "user",
+                        "content": user_input,
+                    }
+                )
+                set_span_output(span, "")
+                return (
+                    history,
+                    "No relevant source paragraphs currently loaded",
+                    "",
+                    False,
+                    session_out,
+                    topic_out,
+                )
+
+            result = get_rag_response(user_input, session_id=session_out or None)
+            session_out = result.get("sessionId", "") or ""
+            topic_out = result.get("topic", "General Enquiry")
+            docs_content_string = result.get("sources_html", "")
+            # Answer text is passed through instruction_prompt_out for the streamer step.
+            instruction_prompt_out = result.get("response", "")
+
+            set_span_output(span, instruction_prompt_out)
+            set_span_attr(span, "qa.topic", topic_out)
+            set_span_attr(span, "qa.citations_count", result.get("citations_count", 0))
+            set_span_attr(span, "qa.passages_count", result.get("passages_count", 0))
+            set_span_attr(span, "qa.top_score", result.get("top_score"))
+            scores = result.get("retrieval_scores") or []
+            if scores:
+                set_span_attr(
+                    span,
+                    "qa.retrieval_scores",
+                    ",".join(f"{s:.4f}" for s in scores),
+                )
+            set_retrieval_documents(span, result.get("passages") or [])
+            set_span_attr(span, "qa.guardrail", result.get("guardrail", False))
+            set_span_attr(span, "qa.bedrock_session_id", session_out or None)
+            if result.get("retrieve_error"):
+                set_span_attr(span, "qa.retrieve_error", result["retrieve_error"])
+
+            history.append(
+                {
+                    "metadata": None,
+                    "options": None,
+                    "role": "user",
+                    "content": user_input,
+                }
+            )
+            return (
+                history,
+                docs_content_string,
+                instruction_prompt_out,
+                True,
+                session_out,
+                topic_out,
+            )
+
+        # Create instruction prompt
+        instruction_prompt, content_prompt = base_prompt_templates(
+            model_type=model_type
+        )
+
+        (
+            instruction_prompt_out,
+            docs_content_string,
+            new_question_kworded,
+            scored_passages,
+        ) = generate_expanded_prompt(
             {"question": user_input, "chat_history": history},  # vectorstore,
             instruction_prompt,
             content_prompt,
@@ -277,13 +684,37 @@ def create_full_prompt(
             relevant_flag,
             out_passages,
         )
-    )
 
-    history.append(
-        {"metadata": None, "options": None, "role": "user", "content": user_input}
-    )
+        retrieval_scores = [
+            p["score"]
+            for p in scored_passages
+            if isinstance(p.get("score"), (int, float))
+        ]
+        set_span_output(span, docs_content_string)
+        set_span_attr(span, "qa.expanded_query", new_question_kworded)
+        set_span_attr(span, "qa.relevant", relevant_flag)
+        set_span_attr(span, "qa.passages_count", len(scored_passages))
+        if retrieval_scores:
+            set_span_attr(span, "qa.top_score", retrieval_scores[0])
+            set_span_attr(
+                span,
+                "qa.retrieval_scores",
+                ",".join(f"{s:.4f}" for s in retrieval_scores),
+            )
+        set_retrieval_documents(span, scored_passages)
 
-    return history, docs_content_string, instruction_prompt_out, relevant_flag
+        history.append(
+            {"metadata": None, "options": None, "role": "user", "content": user_input}
+        )
+
+        return (
+            history,
+            docs_content_string,
+            instruction_prompt_out,
+            relevant_flag,
+            session_out,
+            topic_out,
+        )
 
 
 def call_aws_bedrock(
@@ -596,6 +1027,108 @@ def produce_streaming_answer_chatbot(
         {"metadata": None, "options": None, "role": "user", "content": ""}
     ],
     in_api_key: str = GEMINI_API_KEY,
+    session_hash: str = "",
+    user_query: str = "",
+    max_new_tokens: int = max_new_tokens,
+    sample: bool = sample,
+    repetition_penalty: float = repetition_penalty,
+    top_p: float = top_p,
+    top_k: float = top_k,
+    max_tokens: int = max_tokens,
+):
+    """Stream chat answers; emit a Phoenix LLM span when tracing is enabled."""
+    from tools.phoenix_tracing import (
+        end_chat_span,
+        set_span_output,
+        start_chat_span,
+        tracing_initialized,
+    )
+
+    kwargs = dict(
+        history=history,
+        full_prompt=full_prompt,
+        model_type=model_type,
+        temperature=temperature,
+        relevant_query_bool=relevant_query_bool,
+        chat_history=chat_history,
+        in_api_key=in_api_key,
+        max_new_tokens=max_new_tokens,
+        sample=sample,
+        repetition_penalty=repetition_penalty,
+        top_p=top_p,
+        top_k=top_k,
+        max_tokens=max_tokens,
+    )
+
+    if not tracing_initialized():
+        yield from _produce_streaming_answer_chatbot_impl(**kwargs)
+        return
+
+    backend = "bedrock_kb" if USE_BEDROCK_KB == "1" else "local_generate"
+    traced_model = (
+        f"AWS Bedrock KB ({BEDROCK_MODEL_ID})" if USE_BEDROCK_KB == "1" else model_type
+    )
+    prompt_preview = full_prompt if isinstance(full_prompt, str) else str(full_prompt)
+    # Prefer the raw Gradio message; fall back to last user turn in history.
+    raw_query = (user_query or "").strip()
+    if not raw_query and chat_history:
+        for turn in reversed(chat_history):
+            if isinstance(turn, dict) and turn.get("role") == "user":
+                content = turn.get("content")
+                if isinstance(content, str):
+                    raw_query = content.strip()
+                elif isinstance(content, list):
+                    raw_query = " ".join(
+                        (
+                            str(part.get("text", part))
+                            if isinstance(part, dict)
+                            else str(part)
+                        )
+                        for part in content
+                    ).strip()
+                break
+
+    # start_span (not as_current): Gradio yields across contexts/threads.
+    span = start_chat_span(
+        "chat.generate",
+        kind="LLM",
+        session_hash=session_hash,
+        input_value=prompt_preview,
+        attributes={
+            "qa.backend": backend,
+            "qa.model_type": traced_model,
+            "qa.user_query": raw_query or None,
+        },
+    )
+    final_text = ""
+    error: BaseException | None = None
+    try:
+        for hist in _produce_streaming_answer_chatbot_impl(**kwargs):
+            if (
+                hist
+                and isinstance(hist[-1], dict)
+                and hist[-1].get("role") == "assistant"
+            ):
+                final_text = hist[-1].get("content") or final_text
+            yield hist
+        set_span_output(span, final_text)
+    except BaseException as exc:
+        error = exc
+        raise
+    finally:
+        end_chat_span(span, error=error)
+
+
+def _produce_streaming_answer_chatbot_impl(
+    history: list,
+    full_prompt: str,
+    model_type: str,
+    temperature: float = temperature,
+    relevant_query_bool: bool = True,
+    chat_history: list[dict] = [
+        {"metadata": None, "options": None, "role": "user", "content": ""}
+    ],
+    in_api_key: str = GEMINI_API_KEY,
     max_new_tokens: int = max_new_tokens,
     sample: bool = sample,
     repetition_penalty: float = repetition_penalty,
@@ -626,17 +1159,40 @@ def produce_streaming_answer_chatbot(
         yield history
         return
 
+    # Bedrock KB already produced the final answer in create_full_prompt.
+    if USE_BEDROCK_KB == "1":
+        answer_text = full_prompt if isinstance(full_prompt, str) else str(full_prompt)
+        answer_text = strip_model_artifacts(
+            (answer_text or "").strip() or "No response from knowledge base.",
+            finalize=True,
+        )
+
+        history.append(
+            {
+                "metadata": None,
+                "options": None,
+                "role": "assistant",
+                "content": "",
+            }
+        )
+        for char in answer_text:
+            time.sleep(0.001)
+            history[-1]["content"] += char
+            yield history
+        return
+
     if model_type == SMALL_MODEL_NAME:
+
+        begin_generation_run()
 
         # Get the model and tokenizer, and tokenize the user text.
         model_inputs = tokenizer(
             text=full_prompt, return_tensors="pt", return_attention_mask=False
         ).to(torch_device)
 
-        # Start generation on a separate thread, so that we don't block the UI. The text is pulled from the streamer
-        # in the main thread. Adds timeout to the streamer to handle exceptions in the generation thread.
+        # timeout=None: we apply first-token / between-token waits ourselves below.
         streamer = TextIteratorStreamer(
-            tokenizer, timeout=120.0, skip_prompt=True, skip_special_tokens=True
+            tokenizer, timeout=None, skip_prompt=True, skip_special_tokens=True
         )
         generate_kwargs = dict(
             model_inputs,
@@ -647,37 +1203,82 @@ def produce_streaming_answer_chatbot(
             top_p=top_p,
             temperature=temperature,
             top_k=top_k,
+            stopping_criteria=StoppingCriteriaList([_CancelOnEvent()]),
         )
 
-        t = Thread(target=model_object.generate, kwargs=generate_kwargs)
+        t = Thread(target=model_object.generate, kwargs=generate_kwargs, daemon=True)
         t.start()
 
         # Pull the generated text from the streamer, and update the model output.
         start = time.time()
         NUM_TOKENS = 0
         print("-" * 4 + "Start Generation" + "-" * 4)
+        print(
+            f"First-token timeout: {GENERATION_FIRST_TOKEN_TIMEOUT:.0f}s; "
+            f"between-token timeout: {GENERATION_TOKEN_TIMEOUT:.0f}s"
+        )
 
         history.append(
             {"metadata": None, "options": None, "role": "assistant", "content": ""}
         )
+        raw_output = ""
+        # Yield immediately so the UI is not blank while waiting on first token,
+        # and so Gradio can process Stop / cancel between yields.
+        yield history
 
-        for new_text in streamer:
-            try:
+        try:
+            for new_text in _iter_text_streamer(
+                streamer,
+                first_token_timeout=GENERATION_FIRST_TOKEN_TIMEOUT,
+                token_timeout=GENERATION_TOKEN_TIMEOUT,
+            ):
+                if _generation_cancel.is_set():
+                    history[-1]["content"] = strip_model_artifacts(
+                        raw_output, finalize=True
+                    ) or "Generation stopped."
+                    yield history
+                    return
                 if new_text is None:
                     new_text = ""
-                history[-1]["content"] += new_text
+                raw_output += new_text
+                history[-1]["content"] = strip_model_artifacts(raw_output)
                 NUM_TOKENS += 1
                 yield history
-            except Exception as e:
-                print(f"Error during text generation: {e}")
+        except TimeoutError as e:
+            _generation_cancel.set()
+            print(f"Generation timeout: {e}")
+            history[-1]["content"] = str(e)
+            yield history
+            return
+        except Exception as e:
+            _generation_cancel.set()
+            print(f"Error during text generation: {e}")
+            history[-1]["content"] = (
+                strip_model_artifacts(raw_output, finalize=True)
+                or f"Generation failed: {e}"
+            )
+            yield history
+            return
+
+        if _generation_cancel.is_set():
+            history[-1]["content"] = (
+                strip_model_artifacts(raw_output, finalize=True)
+                or "Generation stopped."
+            )
+            yield history
+            return
+
+        history[-1]["content"] = strip_model_artifacts(raw_output, finalize=True)
+        yield history
 
         time_generate = time.time() - start
         print("\n")
         print("-" * 4 + "End Generation" + "-" * 4)
         print(f"Num of generated tokens: {NUM_TOKENS}")
-        print(f"Time for complete generation: {time_generate}s")
-        print(f"Tokens per secound: {NUM_TOKENS/time_generate}")
-        print(f"Time per token: {(time_generate/NUM_TOKENS)*1000}ms")
+        if NUM_TOKENS > 0 and time_generate > 0:
+            print(f"Time for complete generation: {time_generate:.2f}s")
+            print(f"Tokens per secound: {NUM_TOKENS/time_generate:.2f}")
+            print(f"Time per token: {(time_generate/NUM_TOKENS)*1000:.2f}ms")
 
     elif model_type == LARGE_MODEL_NAME:
         # tokens = model.tokenize(full_prompt)
@@ -697,6 +1298,7 @@ def produce_streaming_answer_chatbot(
         history.append(
             {"metadata": None, "options": None, "role": "assistant", "content": ""}
         )
+        raw_output = ""
 
         for out in output:
 
@@ -705,19 +1307,23 @@ def produce_streaming_answer_chatbot(
                 and len(out["choices"]) > 0
                 and "text" in out["choices"][0]
             ):
-                history[-1]["content"] += out["choices"][0]["text"]
+                raw_output += out["choices"][0]["text"]
+                history[-1]["content"] = strip_model_artifacts(raw_output)
                 NUM_TOKENS += 1
                 yield history
             else:
                 print(f"Unexpected output structure: {out}")
 
+        history[-1]["content"] = strip_model_artifacts(raw_output, finalize=True)
+        yield history
+
         time_generate = time.time() - start
         print("\n")
         print("-" * 4 + "End Generation" + "-" * 4)
         print(f"Num of generated tokens: {NUM_TOKENS}")
-        print(f"Time for complete generation: {time_generate}s")
-        print(f"Tokens per second: {NUM_TOKENS/time_generate}")
-        print(f"Time per token: {(time_generate/NUM_TOKENS)*1000}ms")
+        print(f"Time for complete generation: {time_generate:.2f}s")
+        print(f"Tokens per second: {NUM_TOKENS/time_generate:.2f}")
+        print(f"Time per token: {(time_generate/NUM_TOKENS)*1000:.2f}ms")
 
     elif model_type in AWS_MODELS:
         system_prompt = "You are answering questions from the user based on source material. Make sure to fully answer the questions with all required detail."
@@ -753,6 +1359,9 @@ def produce_streaming_answer_chatbot(
             response_texts = [resp.text for resp in responses]
 
         latest_response_text = response_texts[-1]
+        latest_response_text = strip_model_artifacts(
+            latest_response_text, finalize=True
+        )
 
         # Update the conversation history with the new prompt and response
         clean_text = re.sub(
@@ -816,6 +1425,9 @@ def produce_streaming_answer_chatbot(
             response_texts = [resp.text for resp in responses]
 
         latest_response_text = response_texts[-1]
+        latest_response_text = strip_model_artifacts(
+            latest_response_text, finalize=True
+        )
 
         clean_text = re.sub(
             r"[\n\t\r]", " ", latest_response_text
@@ -1145,12 +1757,52 @@ def get_expanded_passages(vectorstore, docs, width):
         return content_str_out, meta_first_out, meta_last_out
 
     def merge_dicts_except_source(d1, d2):
+        """Merge first/last chunk metadata for an expanded passage.
+
+        Empty values are skipped. Line numbers become a start–end range using
+        the first chunk's start_line and the last chunk's end_line when present.
+        """
         merged = {}
-        for key in d1:
-            if key != "source":
-                merged[key] = str(d1[key]) + " to " + str(d2[key])
+        keys = set(d1) | set(d2)
+
+        # Prefer an explicit line span for expanded passages.
+        start_line = d1.get("start_line")
+        end_line = d2.get("end_line")
+        if end_line is None:
+            end_line = d2.get("start_line")
+        if start_line is None:
+            start_line = d2.get("start_line")
+        if start_line is not None and str(start_line).strip() != "":
+            if end_line is not None and str(end_line).strip() != "":
+                if str(start_line) == str(end_line):
+                    merged["start_line"] = start_line
+                else:
+                    merged["start_line"] = f"{start_line} to {end_line}"
             else:
-                merged[key] = d1[key]  # or d2[key], based on preference
+                merged["start_line"] = start_line
+
+        for key in keys:
+            if key in {"start_line", "end_line"}:
+                continue
+            if key == "source":
+                merged[key] = (
+                    d1.get(key) if d1.get(key) not in (None, "") else d2.get(key)
+                )
+                continue
+
+            v1, v2 = d1.get(key), d2.get(key)
+            v1_empty = v1 is None or str(v1).strip() == ""
+            v2_empty = v2 is None or str(v2).strip() == ""
+
+            if v1_empty and v2_empty:
+                continue
+            if v1_empty:
+                merged[key] = v2
+                continue
+            if v2_empty or str(v1) == str(v2):
+                merged[key] = v1
+                continue
+            merged[key] = f"{v1} to {v2}"
         return merged
 
     def merge_two_lists_of_dicts(list1, list2):
@@ -1221,23 +1873,13 @@ def _message_content_to_str(content) -> str:
 def highlight_found_text(
     chat_history: list[dict],
     source_texts: list[dict],
-    hlt_chunk_size: int = hlt_chunk_size,
-    hlt_strat: List = hlt_strat,
-    hlt_overlap: int = hlt_overlap,
+    min_match_words: int = hlt_min_match_words,
 ) -> str:
     """
-    Highlights occurrences of chat_history within source_texts.
+    Highlight source passages that also appear in the latest assistant reply.
 
-    Parameters:
-    - chat_history (str): The text to be searched for within source_texts.
-    - source_texts (str): The text within which chat_history occurrences will be highlighted.
-
-    Returns:
-    - str: A string with occurrences of chat_history highlighted.
-
-    Example:
-    >>> highlight_found_text("world", "Hello, world! This is a test. Another world awaits.")
-    'Hello, <mark style="color:black;">world</mark>! This is a test. Another <mark style="color:black;">world</mark> awaits.'
+    Only contiguous sequences of at least ``min_match_words`` complete words
+    are highlighted. Partial-word / short fragment matches are ignored.
     """
 
     def extract_text_from_input(text, i=0):
@@ -1248,8 +1890,6 @@ def highlight_found_text(
         else:
             return ""
 
-    print("chat_history:", chat_history)
-
     response_content = next(
         (
             entry["content"]
@@ -1259,69 +1899,90 @@ def highlight_found_text(
         "",
     )
     response_text = _message_content_to_str(response_content)
-
     source_texts = extract_text_from_input(source_texts)
 
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=hlt_chunk_size,
-        separators=hlt_strat,
-        chunk_overlap=hlt_overlap,
-    )
-    sections = text_splitter.split_text(response_text)
+    if not response_text or not source_texts:
+        return source_texts
 
-    found_positions = {}
-    for x in sections:
-        if not isinstance(x, str):
-            continue
-        text_start_pos = 0
-        while text_start_pos != -1:
-            text_start_pos = source_texts.find(x, text_start_pos)
-            if text_start_pos != -1:
-                found_positions[text_start_pos] = text_start_pos + len(x)
-                text_start_pos += 1
+    # Complete words only (no mid-token fragments)
+    word_re = re.compile(r"\b[\w']+\b", re.UNICODE)
+    response_words = [m.group().lower() for m in word_re.finditer(response_text)]
+    if len(response_words) < min_match_words:
+        return source_texts
 
-    # Combine overlapping or adjacent positions
-    sorted_starts = sorted(found_positions.keys())
+    # All consecutive word n-grams from the reply that meet the minimum length
+    response_ngrams: set[tuple[str, ...]] = set()
+    for n in range(min_match_words, len(response_words) + 1):
+        for i in range(len(response_words) - n + 1):
+            response_ngrams.add(tuple(response_words[i : i + n]))
+
+    source_matches = list(word_re.finditer(source_texts))
+    source_words_lower = [m.group().lower() for m in source_matches]
+    n_source = len(source_words_lower)
+
+    # Greedily mark longest qualifying word sequences in the sources
+    matched = [False] * n_source
+    i = 0
+    while i < n_source:
+        best_len = 0
+        max_len = min(n_source - i, len(response_words))
+        for length in range(max_len, min_match_words - 1, -1):
+            if tuple(source_words_lower[i : i + length]) in response_ngrams:
+                best_len = length
+                break
+        if best_len:
+            for j in range(i, i + best_len):
+                matched[j] = True
+            i += best_len
+        else:
+            i += 1
+
+    if not any(matched):
+        return source_texts
+
+    # Collapse matched word runs into character spans (keep intervening punctuation)
     combined_positions = []
-    if sorted_starts:
-        current_start, current_end = sorted_starts[0], found_positions[sorted_starts[0]]
-        for start in sorted_starts[1:]:
-            if start <= (current_end + 10):
-                current_end = max(current_end, found_positions[start])
-            else:
-                combined_positions.append((current_start, current_end))
-                current_start, current_end = start, found_positions[start]
-        combined_positions.append((current_start, current_end))
+    run_start = None
+    for idx, is_match in enumerate(matched):
+        if is_match and run_start is None:
+            run_start = idx
+        elif not is_match and run_start is not None:
+            if idx - run_start >= min_match_words:
+                combined_positions.append(
+                    (source_matches[run_start].start(), source_matches[idx - 1].end())
+                )
+            run_start = None
+    if run_start is not None and n_source - run_start >= min_match_words:
+        combined_positions.append(
+            (source_matches[run_start].start(), source_matches[n_source - 1].end())
+        )
 
-    # Construct pos_tokens
     pos_tokens = []
     prev_end = 0
     for start, end in combined_positions:
-        if (
-            end - start > 15
-        ):  # Only combine if there is a significant amount of matched text. Avoids picking up single words like 'and' etc.
-            pos_tokens.append(source_texts[prev_end:start])
-            pos_tokens.append(
-                '<mark style="color:black;">' + source_texts[start:end] + "</mark>"
-            )
-            prev_end = end
+        pos_tokens.append(source_texts[prev_end:start])
+        pos_tokens.append(
+            '<mark style="color:black;">' + source_texts[start:end] + "</mark>"
+        )
+        prev_end = end
     pos_tokens.append(source_texts[prev_end:])
 
-    out_pos_tokens = "".join(pos_tokens)
-
-    return out_pos_tokens
+    return "".join(pos_tokens)
 
 
 # # Chat history functions
 
 
-def clear_chat(chat_history_state, sources, chat_message, current_topic):
+def clear_chat(
+    chat_history_state, sources, chat_message, current_topic, bedrock_session_id=""
+):
     chat_history_state = None
     sources = ""
     chat_message = None
     current_topic = ""
+    bedrock_session_id = ""
 
-    return chat_history_state, sources, chat_message, current_topic
+    return chat_history_state, sources, chat_message, current_topic, bedrock_session_id
 
 
 def _get_chat_history(
@@ -1358,6 +2019,10 @@ def add_inputs_answer_to_history(user_message, history, current_topic):
 
     if history is None:
         history = [("", "")]
+
+    # Bedrock KB topic comes from citation filenames; keep it instead of KeyBERT.
+    if USE_BEDROCK_KB == "1":
+        return history, current_topic
 
     # history.append((user_message, [-1]))
 

@@ -111,10 +111,17 @@ class RecursiveCharacterTextSplitter:
             for i, split in enumerate(splits):
                 doc_metadata = metadata.copy()
                 if self.add_start_index:
-                    # Find start index in original text
+                    # Prefer locating the split without the overlap prefix when possible.
                     start_idx = text.find(split)
+                    if start_idx == -1 and split:
+                        # Overlap can make the full chunk not appear as a contiguous substring.
+                        start_idx = text.find(split[: min(64, len(split))])
                     if start_idx != -1:
+                        end_idx = min(len(text), start_idx + len(split))
                         doc_metadata["start_index"] = start_idx
+                        # 1-based line numbers in the source text (more intuitive than char offsets).
+                        doc_metadata["start_line"] = text.count("\n", 0, start_idx) + 1
+                        doc_metadata["end_line"] = text.count("\n", 0, end_idx) + 1
                 all_docs.append(Document(page_content=split, metadata=doc_metadata))
 
         return all_docs

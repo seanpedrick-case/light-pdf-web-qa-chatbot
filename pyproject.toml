@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "light-pdf-web-qa-chatbot"
-version = "0.2.0"
+version = "0.3.0"
 description = "Chat with PDFs, web pages, or data files using a Gradio-based QA chatbot"
 readme = "README.md"
 authors = [
@@ -79,6 +79,15 @@ aws = [
     "scikit-learn<=1.9.0",
 ]
 
+# Local Arize Phoenix / OTEL chat tracing (ARIZE_TRACING_ENABLED=1)
+phoenix = [
+    "arize-phoenix-otel<=0.17.1",
+    "openinference-semantic-conventions<=0.1.25",
+    "openinference-instrumentation<=0.3.24",
+    "opentelemetry-api<=1.39.1",
+    "opentelemetry-sdk<=1.39.1",
+]
+
 [project.urls]
 Homepage = "https://github.com/seanpedrick-case/light-pdf-web-qa-chatbot"
 Repository = "https://github.com/seanpedrick-case/light-pdf-web-qa-chatbot"
@@ -87,8 +96,7 @@ Repository = "https://github.com/seanpedrick-case/light-pdf-web-qa-chatbot"
 [tool.setuptools]
 include-package-data = true
 py-modules = [
-    "app",
-    "ingest_borough_plan",
+    "app"
 ]
 
 [tool.setuptools.packages.find]
