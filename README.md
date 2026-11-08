@@ -30,6 +30,30 @@ Credentials follow the existing AWS pattern (instance/task role, or `AWS_ACCESS_
 
 The sources accordion uses Bedrock **Retrieve** results (ranked by `score`). `RetrieveAndGenerate` citations alone often omit unused chunks and do not include retrieval scores.
 
+## Optional Jina reranker (local FAISS retrieval)
+
+After vector + BM25 hybrid fusion, you can rerank the candidate passages with [jinaai/jina-reranker-v3.5](https://huggingface.co/jinaai/jina-reranker-v3.5) via Transformers (`trust_remote_code=True`). This does not apply when `USE_BEDROCK_KB=1`.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ENABLE_RERANKER` | `False` | Turn on listwise reranking after hybrid retrieval |
+| `RERANKER_MODEL_NAME` | `jinaai/jina-reranker-v3.5` | Hugging Face model id |
+| `PRELOAD_RERANKER` | `False` | Load the reranker at app startup (else first chat query) |
+| `SHOW_RETRIEVAL_DETAILS` | `True` | Prepend vector / hybrid / rerank score breakdown to the sources panel |
+
+Example in `config/app_config.env`:
+
+```
+ENABLE_RERANKER=True
+PRELOAD_RERANKER=True
+```
+
+The reranker is ~0.6B parameters; expect extra RAM (~1–2GB) and slower retrieval on CPU. Set `HF_TOKEN` if the Hub requires authentication. Source passage scores shown in the UI / Phoenix use the reranker `relevance_score` when reranking is enabled.
+
+With `SHOW_RETRIEVAL_DETAILS=True`, each answer updates the closed **Retrieval diagnostics** accordion on the Chatbot tab (Markdown): FAISS cosine shortlist, hybrid fusion ranks/scores, and reranker scores when enabled. The **Source paragraphs** panel shows passage text only. Set `LOGGING=True` for JSON in the console and BM25 rank prints during retrieval.
+
+**License:** `jina-reranker-v3.5` is [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (non-commercial). Confirm that fits your deployment; commercial use requires permission from Jina.
+
 ## Arize Phoenix tracing (local)
 
 Send retrieve/generate spans to a locally hosted [Arize Phoenix](https://docs.arize.com/phoenix) collector (same pattern as custom Pi spans in the doc-redaction agent — not LangChain auto-instrumentation).

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "light-pdf-web-qa-chatbot"
-version = "0.3.0"
+version = "0.4.0"
 description = "Chat with PDFs, web pages, or data files using a Gradio-based QA chatbot"
 readme = "README.md"
 authors = [
@@ -41,12 +41,12 @@ dependencies = [
     "google-genai<=2.22.0",
     "pandas<=3.0.5",
     "markdown<=3.10.3",
-    "transformers<=5.16.1",
+    "transformers<=5.22.2",
     # CPU torch by default. For a CPU wheel from the PyTorch index:
     #   pip install "torch>=2.14.0" --index-url https://download.pytorch.org/whl/cpu
     "torch>=2.14.0",
-    "sentence-transformers<=6.0.1",
-    "faiss-cpu<=1.15.0",
+    "sentence-transformers<=6.2.0",
+    "faiss-cpu<=1.15.1",
     "pypdf<=6.18.0",
     "python-docx<=1.2.0",
     "keybert<=0.9.0",
@@ -58,6 +58,7 @@ dependencies = [
     "numpy<=2.5.3",
     "boto3<=1.43.90",
     "python-dotenv<=1.2.3",
+    "peft"
 ]
 
 [project.optional-dependencies]

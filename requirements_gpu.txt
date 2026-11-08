@@ -2,11 +2,11 @@ beautifulsoup4<=4.15.0
 google-genai<=2.22.0
 pandas<=3.0.5
 markdown<=3.10.3
-transformers<=5.16.1
+transformers<=5.22.2
 # for torch GPU version use: --extra-index-url https://download.pytorch.org/whl/cu130
 torch>=2.14.0
-sentence_transformers<=6.0.1
-faiss-cpu<=1.15.0
+sentence_transformers<=6.2.0
+faiss-cpu<=1.15.1
 pypdf<=6.18.0
 python-docx<=1.2.0
 keybert<=0.9.0
@@ -19,6 +19,7 @@ scipy>=1.18.1
 numpy<=2.5.3
 boto3<=1.43.90
 python-dotenv<=1.2.3
+peft
 # Optional: Arize Phoenix / AX chat tracing (enable with ARIZE_TRACING_ENABLED=1)
 arize-phoenix-otel<=0.17.1
 openinference-semantic-conventions<=0.1.25

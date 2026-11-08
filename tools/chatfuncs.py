@@ -3,9 +3,9 @@ import os
 import re
 import time
 from itertools import compress
+from queue import Empty
 from threading import Event, Thread
 from typing import Dict, List, Optional, Tuple, Type
-from queue import Empty
 
 # For Name Entity Recognition model
 # from span_marker import SpanMarkerModel # Not currently used
@@ -25,18 +25,27 @@ from keybert import KeyBERT
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import RegexpTokenizer
-from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer, pipeline
+from transformers import (
+    StoppingCriteria,
+    StoppingCriteriaList,
+    TextIteratorStreamer,
+    pipeline,
+)
 
 from tools.config import (
     AWS_DEFAULT_REGION,
     AWS_MODELS,
     BEDROCK_MODEL_ID,
+    EMBEDDINGS_MODEL_NAME,
+    ENABLE_RERANKER,
     FEEDBACK_LOGS_FOLDER,
     GEMINI_API_KEY,
     GENERATION_FIRST_TOKEN_TIMEOUT,
     GENERATION_TOKEN_TIMEOUT,
     LARGE_MODEL_NAME,
+    LOGGING,
     RUN_AWS_FUNCTIONS,
+    SHOW_RETRIEVAL_DETAILS,
     SMALL_MODEL_NAME,
     USE_BEDROCK_KB,
 )
@@ -59,6 +68,14 @@ from tools.prompts import (
     instruction_prompt_phi3,
     instruction_prompt_qwen,
     instruction_prompt_template_gemini_aws,
+)
+from tools.reranker import rerank_passages
+from tools.retrieval_report import (
+    build_vector_hits,
+    doc_source,
+    faiss_index_size,
+    format_retrieval_details_markdown,
+    log_retrieval_report,
 )
 
 model_object = []  # Define empty list for model functions to run
@@ -434,11 +451,12 @@ def generate_expanded_prompt(
         total_output_passage_chunks_size (int, optional): Number of neighboring chunks to expand for context. Defaults to 5.
 
     Returns:
-        tuple: (instruction_prompt_out, sources_docs_content_string, new_question_kworded, scored_passages)
+        tuple: (instruction_prompt_out, sources_docs_content_string, new_question_kworded, scored_passages, retrieval_report, retrieval_details_md)
             instruction_prompt_out (str): The fully formatted instruction prompt for the model.
             sources_docs_content_string (str): The formatted string of source passages and metadata for user display.
             new_question_kworded (str): The (possibly keyword-adapted) user question.
             scored_passages (list[dict]): Winning passages with text, score, and source for Phoenix.
+            retrieval_report (dict): Step-by-step hybrid retrieval diagnostics.
     """
 
     question = inputs["question"]
@@ -448,7 +466,12 @@ def generate_expanded_prompt(
         new_question_kworded = adapt_q_from_chat_history(
             question, chat_history, extracted_memory
         )  # new_question_keywords,
-        docs_keep_as_doc, doc_df, docs_keep_out = hybrid_retrieval(
+        (
+            docs_keep_as_doc,
+            doc_df,
+            docs_keep_out,
+            retrieval_report,
+        ) = hybrid_retrieval(
             new_question_kworded,
             vectorstore,
             embeddings_model,
@@ -461,11 +484,19 @@ def generate_expanded_prompt(
             bm25_weight=1,
             svm_weight=1,
         )
+        log_retrieval_report(retrieval_report)
     else:
         new_question_kworded = question
         doc_df = pd.DataFrame()
         docs_keep_as_doc = []
         docs_keep_out = []
+        retrieval_report = {}
+
+    retrieval_details_md = (
+        format_retrieval_details_markdown(retrieval_report)
+        if SHOW_RETRIEVAL_DETAILS and retrieval_report
+        else ""
+    )
 
     scored_passages: list[dict] = []
     for item in docs_keep_out or []:
@@ -489,6 +520,8 @@ def generate_expanded_prompt(
             "No relevant sources found.",
             new_question_kworded,
             scored_passages,
+            retrieval_report,
+            retrieval_details_md,
         )
 
     # Expand the found passages to the neighbouring context
@@ -539,6 +572,8 @@ def generate_expanded_prompt(
         sources_docs_content_string,
         new_question_kworded,
         scored_passages,
+        retrieval_report,
+        retrieval_details_md,
     )
 
 
@@ -577,6 +612,7 @@ def create_full_prompt(
         relevant_flag = True
 
     from tools.phoenix_tracing import (
+        _json_attr,
         chat_span,
         set_retrieval_documents,
         set_span_attr,
@@ -616,6 +652,7 @@ def create_full_prompt(
                 return (
                     history,
                     "No relevant source paragraphs currently loaded",
+                    "",
                     "",
                     False,
                     session_out,
@@ -658,6 +695,7 @@ def create_full_prompt(
             return (
                 history,
                 docs_content_string,
+                "_Retrieval uses AWS Bedrock Knowledge Base (local hybrid pipeline not run)._",
                 instruction_prompt_out,
                 True,
                 session_out,
@@ -674,6 +712,8 @@ def create_full_prompt(
             docs_content_string,
             new_question_kworded,
             scored_passages,
+            retrieval_report,
+            retrieval_details_md,
         ) = generate_expanded_prompt(
             {"question": user_input, "chat_history": history},  # vectorstore,
             instruction_prompt,
@@ -702,6 +742,8 @@ def create_full_prompt(
                 ",".join(f"{s:.4f}" for s in retrieval_scores),
             )
         set_retrieval_documents(span, scored_passages)
+        if retrieval_report:
+            set_span_attr(span, "qa.retrieval_report", _json_attr(retrieval_report))
 
         history.append(
             {"metadata": None, "options": None, "role": "user", "content": user_input}
@@ -710,6 +752,7 @@ def create_full_prompt(
         return (
             history,
             docs_content_string,
+            retrieval_details_md,
             instruction_prompt_out,
             relevant_flag,
             session_out,
@@ -1233,9 +1276,10 @@ def _produce_streaming_answer_chatbot_impl(
                 token_timeout=GENERATION_TOKEN_TIMEOUT,
             ):
                 if _generation_cancel.is_set():
-                    history[-1]["content"] = strip_model_artifacts(
-                        raw_output, finalize=True
-                    ) or "Generation stopped."
+                    history[-1]["content"] = (
+                        strip_model_artifacts(raw_output, finalize=True)
+                        or "Generation stopped."
+                    )
                     yield history
                     return
                 if new_text is None:
@@ -1527,6 +1571,112 @@ def create_doc_df(docs_keep_out):
     return doc_df
 
 
+def _embeddings_model_label(embeddings_model: HuggingFaceEmbeddings) -> str:
+    return getattr(embeddings_model, "model_name", None) or EMBEDDINGS_MODEL_NAME
+
+
+def _final_report_rows(docs_keep_out: list, score_kind: str) -> list:
+    rows = []
+    for rank, (doc, score) in enumerate(docs_keep_out, 1):
+        rows.append(
+            {
+                "rank": rank,
+                "score": float(score),
+                "score_kind": score_kind,
+                "source": doc_source(doc),
+            }
+        )
+    return rows
+
+
+def _finish_hybrid_retrieval(
+    docs_keep_out: list, report: dict, score_kind: str
+) -> tuple:
+    report["final"] = _final_report_rows(docs_keep_out, score_kind)
+    docs_keep_as_doc = [x[0] for x in docs_keep_out]
+    doc_df = create_doc_df(docs_keep_out)
+    return docs_keep_as_doc, doc_df, docs_keep_out, report
+
+
+def _maybe_rerank(
+    query: str,
+    docs_keep_out: list,
+    top_n: int,
+) -> tuple:
+    """Apply optional Jina reranker after hybrid fusion."""
+    if not docs_keep_out:
+        return docs_keep_out, {
+            "enabled": False,
+            "skipped": True,
+            "reason": "Empty shortlist",
+            "candidates": 0,
+            "results": [],
+        }
+    if not ENABLE_RERANKER:
+        return docs_keep_out, {
+            "enabled": False,
+            "skipped": True,
+            "reason": "ENABLE_RERANKER=False",
+            "candidates": len(docs_keep_out),
+            "results": [],
+        }
+    return rerank_passages(query, docs_keep_out, top_n=top_n)
+
+
+def _new_retrieval_report(
+    query: str,
+    embeddings_model: HuggingFaceEmbeddings,
+    *,
+    k_val: int,
+    vec_score_cut_off: float,
+    vectorstore: FAISS,
+    docs: list,
+) -> dict:
+    return {
+        "query": query,
+        "vector": {
+            "embeddings_model": _embeddings_model_label(embeddings_model),
+            "index_size": faiss_index_size(vectorstore),
+            "k_requested": k_val,
+            "metric": "cosine similarity (L2-normalised inner product / FAISS IndexFlatIP)",
+            "score_cut_off": vec_score_cut_off,
+            "hits": build_vector_hits(docs, vec_score_cut_off=vec_score_cut_off),
+            "candidates_after_filters": 0,
+        },
+        "hybrid": None,
+        "rerank": None,
+        "final": [],
+    }
+
+
+def _print_retrieval_steps(report: dict) -> None:
+    if LOGGING != "True":
+        return
+    vector = report.get("vector") or {}
+    print(
+        "[retrieve] Query embedded with "
+        f"{vector.get('embeddings_model')}; "
+        f"compared top {vector.get('k_requested')} of "
+        f"{vector.get('index_size')} index chunks (cosine)."
+    )
+    kept = sum(1 for h in vector.get("hits") or [] if h.get("kept"))
+    print(f"[retrieve] {kept} chunk(s) passed score/length filters.")
+    hybrid = report.get("hybrid")
+    if hybrid:
+        print(
+            f"[retrieve] Hybrid fusion shortlist: "
+            f"{hybrid.get('shortlist_size')} of {hybrid.get('pool_size')}."
+        )
+    rerank = report.get("rerank") or {}
+    if rerank.get("results"):
+        print(
+            f"[retrieve] Reranker ({rerank.get('model')}): "
+            f"{len(rerank['results'])} passage(s) rescored."
+        )
+    elif rerank.get("skipped"):
+        print(f"[retrieve] Reranker skipped: {rerank.get('reason')}")
+
+
 def hybrid_retrieval(
     new_question_kworded: str,
     vectorstore: FAISS,
@@ -1553,18 +1703,25 @@ def hybrid_retrieval(
         svm_weight (float): Weight for SVM retrieval.
 
     Returns:
-        tuple: (docs_keep_as_doc, doc_df, docs_keep_out)
+        tuple: (docs_keep_as_doc, doc_df, docs_keep_out, retrieval_report)
             docs_keep_as_doc: List of kept document objects.
             doc_df: DataFrame of kept documents and metadata.
             docs_keep_out: List of kept (document, score) tuples.
+            retrieval_report: Diagnostics for vector, hybrid, and rerank steps.
     """
 
-    doc_df = pd.DataFrame()
-
     docs = vectorstore.similarity_search_with_score(new_question_kworded, k=k_val)
+    report = _new_retrieval_report(
+        new_question_kworded,
+        embeddings_model,
+        k_val=k_val,
+        vec_score_cut_off=vec_score_cut_off,
+        vectorstore=vectorstore,
+        docs=docs,
+    )
 
     # Keep only documents with a certain score
-    docs_len = [len(x[0].page_content) for x in docs]
+    [len(x[0].page_content) for x in docs]
     docs_scores = [x[1] for x in docs]
 
     # Only keep sources that are sufficiently relevant (i.e. similarity search score above threshold below)
@@ -1572,50 +1729,54 @@ def hybrid_retrieval(
     docs_keep = list(compress(docs, score_more_limit))
 
     if not docs_keep:
-        return [], pd.DataFrame(), []
+        _print_retrieval_steps(report)
+        return [], pd.DataFrame(), [], report
 
     # Only keep sources that are at least 100 characters long
-    length_more_limit = pd.Series(docs_len) >= 100
+    docs_keep_len = [len(x[0].page_content) for x in docs_keep]
+    length_more_limit = pd.Series(docs_keep_len) >= 100
     docs_keep = list(compress(docs_keep, length_more_limit))
 
     if not docs_keep:
-        return [], pd.DataFrame(), []
+        _print_retrieval_steps(report)
+        return [], pd.DataFrame(), [], report
 
-    docs_keep_as_doc = [x[0] for x in docs_keep]
-    docs_keep_length = len(docs_keep_as_doc)
+    docs_keep_length = len(docs_keep)
+    report["vector"]["candidates_after_filters"] = docs_keep_length
 
     if docs_keep_length == 1:
-
-        content = []
-        meta_url = []
-        score = []
-
-        for item in docs_keep:
-            content.append(item[0].page_content)
-            meta_url.append(item[0].metadata["source"])
-            score.append(item[1])
-
-        # Create df from 'winning' passages
-
-        doc_df = pd.DataFrame(
-            list(zip(content, meta_url, score)),
-            columns=["page_content", "meta_url", "score"],
+        report["hybrid"] = {
+            "pool_size": 1,
+            "shortlist_size": 1,
+            "candidates": [
+                {
+                    "fusion_rank": 1,
+                    "fusion_score": None,
+                    "cosine_score": float(docs_keep[0][1]),
+                    "selected": True,
+                    "source": doc_source(docs_keep[0][0]),
+                }
+            ],
+        }
+        docs_keep_out, rerank_meta = _maybe_rerank(
+            new_question_kworded, docs_keep, out_passages
         )
-
-        docs_content = doc_df["page_content"].astype(str)
-        docs_url = doc_df["meta_url"]
-
-        return docs_keep_as_doc, doc_df, docs_content, docs_url
+        report["rerank"] = rerank_meta
+        score_kind = "reranker" if rerank_meta.get("results") else "cosine"
+        _print_retrieval_steps(report)
+        return _finish_hybrid_retrieval(docs_keep_out, report, score_kind)
 
     # Check for if more docs are removed than the desired output
     if out_passages > docs_keep_length:
         out_passages = docs_keep_length
         k_val = docs_keep_length
 
+    docs_keep_as_doc = [x[0] for x in docs_keep]
     vec_rank = [*range(1, docs_keep_length + 1)]
     vec_score = [(docs_keep_length / x) * vec_weight for x in vec_rank]
 
-    print("Number of documents remaining: ", docs_keep_length)
+    if LOGGING == "True":
+        print("Number of documents remaining: ", docs_keep_length)
 
     # 2nd level check using BM25s package to do keyword search on retrieved passages.
 
@@ -1639,9 +1800,10 @@ def hybrid_retrieval(
         query_tokens, corpus=corpus, k=len(corpus)
     )  # Retrieve all docs
 
-    for i in range(results.shape[1]):
-        doc, score = results[0, i], scores[0, i]
-        print(f"Rank {i+1} (score: {score:.2f}): {doc}")
+    if LOGGING == "True":
+        for i in range(results.shape[1]):
+            doc, score = results[0, i], scores[0, i]
+            print(f"Rank {i+1} (BM25 score: {score:.2f}): {doc[:80]}...")
 
     # print("BM25 results:", results)
     # print("BM25 scores:", scores)
@@ -1706,13 +1868,32 @@ def hybrid_retrieval(
 
     docs_keep_out = [docs_keep[i] for i in best_rank_index_pos]
 
-    # Keep only 'best' options
-    docs_keep_as_doc = [x[0] for x in docs_keep_out]
+    hybrid_candidates = []
+    selected_set = set(best_rank_index_pos)
+    for i, item in enumerate(docs_keep):
+        hybrid_candidates.append(
+            {
+                "fusion_rank": int(final_rank[i]),
+                "fusion_score": float(final_score[i]),
+                "cosine_score": float(item[1]),
+                "selected": i in selected_set,
+                "source": doc_source(item[0]),
+            }
+        )
+    hybrid_candidates.sort(key=lambda row: row["fusion_rank"])
+    report["hybrid"] = {
+        "pool_size": docs_keep_length,
+        "shortlist_size": len(docs_keep_out),
+        "candidates": hybrid_candidates,
+    }
 
-    # Make df of best options
-    doc_df = create_doc_df(docs_keep_out)
-
-    return docs_keep_as_doc, doc_df, docs_keep_out
+    docs_keep_out, rerank_meta = _maybe_rerank(
+        new_question_kworded, docs_keep_out, out_passages
+    )
+    report["rerank"] = rerank_meta
+    score_kind = "reranker" if rerank_meta.get("results") else "hybrid_fusion"
+    _print_retrieval_steps(report)
+    return _finish_hybrid_retrieval(docs_keep_out, report, score_kind)
 
 
 def get_expanded_passages(vectorstore, docs, width):
@@ -1974,15 +2155,28 @@ def highlight_found_text(
 
 
 def clear_chat(
-    chat_history_state, sources, chat_message, current_topic, bedrock_session_id=""
+    chat_history_state,
+    sources,
+    retrieval_details,
+    chat_message,
+    current_topic,
+    bedrock_session_id="",
 ):
     chat_history_state = None
     sources = ""
+    retrieval_details = ""
     chat_message = None
     current_topic = ""
     bedrock_session_id = ""
 
-    return chat_history_state, sources, chat_message, current_topic, bedrock_session_id
+    return (
+        chat_history_state,
+        sources,
+        retrieval_details,
+        chat_message,
+        current_topic,
+        bedrock_session_id,
+    )
 
 
 def _get_chat_history(

@@ -298,7 +298,15 @@ def parse_html(page_url, div_filter="p"):
         str: Extracted content.
         """
         if is_web_url(source):
-            response = requests.get(source)
+            # Descriptive UA required by Wikimedia and helpful for other sites
+            headers = {
+                "User-Agent": (
+                    "Light-PDF-Web-QA-Chatbot/0.3.0 "
+                    "(https://github.com/seanpedrick-case/light-pdf-web-qa-chatbot; "
+                    "spedrickcase@lambeth.gov.uk)"
+                )
+            }
+            response = requests.get(source, headers=headers, timeout=30)
             response.raise_for_status()  # Raise an HTTPError for bad responses
             return response.text.replace("  ", " ").strip()
         elif is_local_html_file(source):
@@ -631,7 +639,9 @@ def docs_elements_from_csv_save(docs_path="documents.csv"):
 
 def load_embeddings_model(embeddings_model=EMBEDDINGS_MODEL_NAME):
 
-    embeddings_func = HuggingFaceEmbeddings(model_name=embeddings_model)
+    embeddings_func = HuggingFaceEmbeddings(
+        model_name=embeddings_model, trust_remote_code=True
+    )
 
     # global embeddings
 

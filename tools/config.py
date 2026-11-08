@@ -343,8 +343,22 @@ DEFAULT_MODEL_CHOICES = get_or_create_env_var(
 )
 
 EMBEDDINGS_MODEL_NAME = get_or_create_env_var(
-    "EMBEDDINGS_MODEL_NAME", "mixedbread-ai/mxbai-embed-xsmall-v1"
+    "EMBEDDINGS_MODEL_NAME",
+    "jinaai/jina-embeddings-v5-text-nano",  # "mixedbread-ai/mxbai-embed-xsmall-v1"
 )  # "mixedbread-ai/mxbai-embed-xsmall-v1"
+
+ENABLE_RERANKER = convert_string_to_boolean(
+    get_or_create_env_var("ENABLE_RERANKER", "False")
+)
+RERANKER_MODEL_NAME = get_or_create_env_var(
+    "RERANKER_MODEL_NAME", "jinaai/jina-reranker-v3.5"
+)
+PRELOAD_RERANKER = convert_string_to_boolean(
+    get_or_create_env_var("PRELOAD_RERANKER", "False")
+)
+SHOW_RETRIEVAL_DETAILS = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_RETRIEVAL_DETAILS", "True")
+)
 
 DEFAULT_EMBEDDINGS_LOCATION = get_or_create_env_var(
     "DEFAULT_EMBEDDINGS_LOCATION", "faiss_embedding/faiss_embedding.zip"

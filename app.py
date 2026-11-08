@@ -21,6 +21,7 @@ from tools.config import (
     DEFAULT_EXAMPLES,
     DEFAULT_MODEL_PROVIDER,
     EMBEDDINGS_MODEL_NAME,
+    ENABLE_RERANKER,
     FEEDBACK_LOGS_FOLDER,
     FILL_SCREEN_WIDTH,
     GEMINI_API_KEY,
@@ -40,6 +41,7 @@ from tools.config import (
     OUTPUT_FOLDER,
     PHOENIX_COLLECTOR_ENDPOINT,
     PHOENIX_PROJECT_NAME,
+    PRELOAD_RERANKER,
     PROVIDER_MODELS,
     ROOT_PATH,
     SMALL_MODEL_NAME,
@@ -98,6 +100,10 @@ else:
     # vectorstore = get_faiss_store(zip_file_path=DEFAULT_EMBEDDINGS_LOCATION,embeddings_model=embeddings_model)#globals()["embeddings"])
     vectorstore = None
     chatf.embeddings = embeddings_model
+    if ENABLE_RERANKER and PRELOAD_RERANKER:
+        from tools.reranker import get_reranker_model
+
+        get_reranker_model()
 # chatf.vectorstore = vectorstore
 
 
@@ -346,6 +352,15 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
                     max_height=500,
                 )  # , height=chat_height
 
+        with gr.Accordion(
+            "Retrieval diagnostics (embedding search, hybrid fusion, reranker)",
+            open=False,
+            visible=USE_BEDROCK_KB != "1",
+        ):
+            retrieval_details = gr.Markdown(
+                value="Ask a question to see vector similarity scores and reranking steps.",
+            )
+
         if USE_BEDROCK_KB == "1":
             gr.Markdown(
                 "Answers come from the AWS Bedrock Knowledge Base (local search and models are bypassed). Ask specific questions for better retrieval."
@@ -519,6 +534,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
             outputs=[
                 chat_history_state,
                 sources,
+                retrieval_details,
                 instruction_prompt_out,
                 relevant_query_state,
                 bedrock_session_id,
@@ -578,6 +594,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
             outputs=[
                 chat_history_state,
                 sources,
+                retrieval_details,
                 instruction_prompt_out,
                 relevant_query_state,
                 bedrock_session_id,
@@ -632,6 +649,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
         inputs=[
             chat_history_state,
             sources,
+            retrieval_details,
             message,
             current_topic,
             bedrock_session_id,
@@ -639,6 +657,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
         outputs=[
             chat_history_state,
             sources,
+            retrieval_details,
             message,
             current_topic,
             bedrock_session_id,
@@ -739,6 +758,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
             inputs=[
                 chat_history_state,
                 sources,
+                retrieval_details,
                 message,
                 current_topic,
                 bedrock_session_id,
@@ -746,6 +766,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
             outputs=[
                 chat_history_state,
                 sources,
+                retrieval_details,
                 message,
                 current_topic,
                 bedrock_session_id,
