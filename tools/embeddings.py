@@ -18,7 +18,9 @@ class HuggingFaceEmbeddings:
         self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2", **kwargs
     ):
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name, **kwargs)
+        self.model = SentenceTransformer(
+            model_name, model_kwargs={"default_task": "retrieval"}, **kwargs
+        )
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Embed a list of documents (L2-normalised)."""
