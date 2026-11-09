@@ -32,6 +32,13 @@ from transformers import (
     pipeline,
 )
 
+from tools.chat_memory import (
+    chat_history_turn_pairs,
+    chat_memory_enabled,
+    llm_conversation_history_from_pairs,
+    memory_turn_limit,
+    summarize_chat_history,
+)
 from tools.config import (
     AWS_DEFAULT_REGION,
     AWS_MODELS,
@@ -74,9 +81,11 @@ from tools.retrieval_report import (
     build_vector_hits,
     doc_source,
     faiss_index_size,
+    format_bedrock_kb_retrieval_details_markdown,
     format_retrieval_details_markdown,
     log_retrieval_report,
 )
+from tools.source_display import passages_to_sources_html
 
 model_object = []  # Define empty list for model functions to run
 tokenizer = []  # Define empty list for model functions to run
@@ -164,7 +173,7 @@ embeddings_model = None  # global variable setup
 vectorstore = None  # global variable setup
 model_type = None  # global variable setup
 
-max_memory_length = 0  # How long should the memory of the conversation last?
+max_memory_length = memory_turn_limit()
 
 source_texts = (
     ""  # Define dummy source text (full text) just to enable highlight function to load
@@ -559,9 +568,18 @@ def generate_expanded_prompt(
     ]
     docs_content_string = "<br><br>".join(modified_page_content)
 
-    sources_docs_content_string = "<br><br>".join(
-        doc_df["content_meta"]
-    )  # .replace("  "," ")#.strip()
+    display_passages = [
+        {
+            "text": row["page_content_no_meta"],
+            "score": row["score"],
+            "source": (row["metadata"] or {}).get("source") or row.get("meta_url", ""),
+            "metadata": row["metadata"] or {},
+        }
+        for _, row in doc_df.iterrows()
+    ]
+    sources_docs_content_string = passages_to_sources_html(
+        display_passages, mode="local"
+    )
 
     instruction_prompt_out = instruction_prompt.replace(
         "{question}", new_question_kworded
@@ -659,8 +677,12 @@ def create_full_prompt(
                     topic_out,
                 )
 
-            result = get_rag_response(user_input, session_id=session_out or None)
-            session_out = result.get("sessionId", "") or ""
+            if chat_memory_enabled():
+                result = get_rag_response(user_input, session_id=session_out or None)
+                session_out = result.get("sessionId", "") or ""
+            else:
+                result = get_rag_response(user_input, session_id=None)
+                session_out = ""
             topic_out = result.get("topic", "General Enquiry")
             docs_content_string = result.get("sources_html", "")
             # Answer text is passed through instruction_prompt_out for the streamer step.
@@ -680,9 +702,27 @@ def create_full_prompt(
                 )
             set_retrieval_documents(span, result.get("passages") or [])
             set_span_attr(span, "qa.guardrail", result.get("guardrail", False))
+            if result.get("guardrail_action") is not None:
+                set_span_attr(span, "qa.guardrail_action", result["guardrail_action"])
+            outcome = result.get("outcome_diagnosis") or {}
+            if outcome.get("headline"):
+                set_span_attr(span, "qa.outcome_headline", outcome["headline"])
             set_span_attr(span, "qa.bedrock_session_id", session_out or None)
             if result.get("retrieve_error"):
                 set_span_attr(span, "qa.retrieve_error", result["retrieve_error"])
+            if result.get("generate_error"):
+                set_span_attr(span, "qa.generate_error", result["generate_error"])
+            set_span_attr(span, "qa.bedrock_success", result.get("success", True))
+            set_span_attr(
+                span,
+                "qa.kb_metadata_filter_applied",
+                result.get("metadataFilterApplied", False),
+            )
+            kb_filter = result.get("metadata_filter")
+            if kb_filter is not None:
+                set_span_attr(span, "qa.kb_metadata_filter", _json_attr(kb_filter))
+
+            retrieval_details_md = format_bedrock_kb_retrieval_details_markdown(result)
 
             history.append(
                 {
@@ -695,7 +735,7 @@ def create_full_prompt(
             return (
                 history,
                 docs_content_string,
-                "_Retrieval uses AWS Bedrock Knowledge Base (local hybrid pipeline not run)._",
+                retrieval_details_md,
                 instruction_prompt_out,
                 True,
                 session_out,
@@ -744,6 +784,12 @@ def create_full_prompt(
         set_retrieval_documents(span, scored_passages)
         if retrieval_report:
             set_span_attr(span, "qa.retrieval_report", _json_attr(retrieval_report))
+
+        prior_conv, _, _, _ = summarize_chat_history(history, max_memory_length)
+        if prior_conv:
+            instruction_prompt_out = (
+                f"Prior conversation:\n{prior_conv}\n\n{instruction_prompt_out}"
+            )
 
         history.append(
             {"metadata": None, "options": None, "role": "user", "content": user_input}
@@ -1377,6 +1423,9 @@ def _produce_streaming_answer_chatbot_impl(
 
         model = model_type
         config = {}
+        prior_llm_history = llm_conversation_history_from_pairs(
+            chat_history_turn_pairs(chat_history)
+        )
 
         (
             responses,
@@ -1386,7 +1435,7 @@ def _produce_streaming_answer_chatbot_impl(
         ) = process_requests(
             full_prompt,
             system_prompt,
-            conversation_history=[],
+            conversation_history=prior_llm_history,
             whole_conversation=[],
             whole_conversation_metadata=[],
             model=model,
@@ -1444,6 +1493,10 @@ def _produce_streaming_answer_chatbot_impl(
             gemini_api_key, temperature, model_type, system_prompt, max_tokens
         )
 
+        prior_llm_history = llm_conversation_history_from_pairs(
+            chat_history_turn_pairs(chat_history)
+        )
+
         (
             responses,
             summary_conversation_history,
@@ -1452,7 +1505,7 @@ def _produce_streaming_answer_chatbot_impl(
         ) = process_requests(
             full_prompt,
             system_prompt,
-            conversation_history=[],
+            conversation_history=prior_llm_history,
             whole_conversation=[],
             whole_conversation_metadata=[],
             model=model,
@@ -2180,45 +2233,22 @@ def clear_chat(
 
 
 def _get_chat_history(
-    chat_history: List[Tuple[str, str]], max_memory_length: int = max_memory_length
+    chat_history, max_memory_length: int = max_memory_length
 ):  # Limit to last x interactions only
-
-    if (not chat_history) | (max_memory_length == 0):
-        chat_history = []
-
-    if len(chat_history) > max_memory_length:
-        chat_history = chat_history[-max_memory_length:]
-
-    # print(chat_history)
-
-    first_q = ""
-    first_ans = ""
-    for human_s, ai_s in chat_history:
-        first_q = human_s
-        first_ans = ai_s
-
-        # print("Text to keyword extract: " + first_q + " " + first_ans)
-        break
-
-    conversation = ""
-    for human_s, ai_s in chat_history:
-        human = "Human: " + human_s
-        ai = "Assistant: " + ai_s
-        conversation += "\n" + "\n".join([human, ai])
-
-    return conversation, first_q, first_ans, max_memory_length
+    return summarize_chat_history(chat_history, max_memory_length)
 
 
 def add_inputs_answer_to_history(user_message, history, current_topic):
 
     if history is None:
-        history = [("", "")]
+        history = []
 
     # Bedrock KB topic comes from citation filenames; keep it instead of KeyBERT.
     if USE_BEDROCK_KB == "1":
         return history, current_topic
 
-    # history.append((user_message, [-1]))
+    if not chat_memory_enabled():
+        return history, ""
 
     (
         chat_history_str,
@@ -2227,8 +2257,10 @@ def add_inputs_answer_to_history(user_message, history, current_topic):
         max_memory_length,
     ) = _get_chat_history(history)
 
-    # Only get the keywords for the first question and response, or do it every time if over 'max_memory_length' responses in the conversation
-    if (len(history) == 1) | (len(history) > max_memory_length):
+    turn_count = len(chat_history_turn_pairs(history))
+
+    # Refresh topic keywords after the first turn or when the in-memory window rolls.
+    if (turn_count <= 1) | (turn_count > max_memory_length):
 
         # print("History after appending is:")
         # print(history)
@@ -2251,10 +2283,11 @@ def add_inputs_answer_to_history(user_message, history, current_topic):
         extracted_memory = " ".join(result)
 
     else:
-        extracted_memory = current_topic
+        extracted_memory = current_topic or ""
 
-    print("Extracted memory is:")
-    print(extracted_memory)
+    if LOGGING == "True":
+        print("Extracted memory is:")
+        print(extracted_memory)
 
     return history, extracted_memory
 

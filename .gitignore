@@ -9,7 +9,14 @@ bootstrapper.py
 build/*
 dist/*
 test/*
+# Local KB / env config (templates *.example.* and *.md may be tracked below)
 config/*
+!config/kb_filter_prompt.example.txt
+!config/kb_filter_groups.example.txt
+!config/bedrock_metadata_filtering.md
+config/app_config.env
+config/kb_filter_groups.txt
+config/kb_filter_prompt.txt
 output/*
 input/*
 borough_plan/*

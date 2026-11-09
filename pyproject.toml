@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "light-pdf-web-qa-chatbot"
-version = "0.4.0"
+version = "0.5.0"
 description = "Chat with PDFs, web pages, or data files using a Gradio-based QA chatbot"
 readme = "README.md"
 authors = [
@@ -37,28 +37,29 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "beautifulsoup4<=4.15.0",
-    "google-genai<=2.22.0",
-    "pandas<=3.0.5",
-    "markdown<=3.10.3",
-    "transformers<=5.22.2",
+    "beautifulsoup4>=4.12.3,<5",
+    "google-genai>=2.33.0,<3",
+    "pandas>=2.3.3,<4",
+    "markdown>=3.10.3,<4",
+    "transformers>=5.19.0,<6",
     # CPU torch by default. For a CPU wheel from the PyTorch index:
-    #   pip install "torch>=2.14.0" --index-url https://download.pytorch.org/whl/cpu
-    "torch>=2.14.0",
-    "sentence-transformers<=6.2.0",
-    "faiss-cpu<=1.15.1",
-    "pypdf<=6.18.0",
-    "python-docx<=1.2.0",
-    "keybert<=0.9.0",
-    "gradio<=6.26.0",
-    "nltk<=3.10.3",
-    "bm25s<=0.3.11",
-    "PyStemmer<=3.1.0",
-    "scipy>=1.18.1",
-    "numpy<=2.5.3",
-    "boto3<=1.43.90",
-    "python-dotenv<=1.2.3",
-    "peft"
+    #   pip install "torch>=2.13.0,<=2.14.1" --index-url https://download.pytorch.org/whl/cpu
+    "torch>=2.13.0,<=2.14.1",
+    "sentence-transformers>=3.3.0,<6.3",
+    "faiss-cpu>=1.9.0,<1.16",
+    "pypdf>=6.0.0,<7",
+    "python-docx>=1.2.0,<2",
+    "keybert>=0.8.0,<1",
+    "gradio>=6.31.0,<7",
+    "nltk>=3.9.0,<4",
+    "bm25s>=0.2.0,<0.4",
+    "PyStemmer>=2.2.0,<4",
+    "scipy>=1.14.0,<2",
+    "numpy>=2,<2.5.0",
+    "boto3>=1.43.117,<2",
+    "python-dotenv>=1.2.4,<2",
+    # transformers 5.x loads peft when installed; requires peft>=0.18.0 (HybridCache removal).
+    "peft>=0.18.0,<0.22",
 ]
 
 [project.optional-dependencies]
@@ -71,22 +72,22 @@ test = ["pytest", "pytest-cov"]
 # After `pip install .[gpu]`, (re)install torch from the CUDA wheel index, e.g.:
 #   pip install "torch>=2.14.0" --index-url https://download.pytorch.org/whl/cu130
 gpu = [
-    "torch>=2.14.0",
+    "torch>=2.13.0,<=2.14.1",
 ]
 
 # AWS: packages used in the AWS/Docker image beyond the base requirements
 # (torch, sentence-transformers, and keybert are expected to be provided by the image).
 aws = [
-    "scikit-learn<=1.9.0",
+    "scikit-learn>=1.7.2,<1.8",
 ]
 
 # Local Arize Phoenix / OTEL chat tracing (ARIZE_TRACING_ENABLED=1)
 phoenix = [
-    "arize-phoenix-otel<=0.17.1",
-    "openinference-semantic-conventions<=0.1.25",
-    "openinference-instrumentation<=0.3.24",
-    "opentelemetry-api<=1.39.1",
-    "opentelemetry-sdk<=1.39.1",
+    "arize-phoenix-otel>=0.17.0,<0.18",
+    "openinference-semantic-conventions>=0.1.20,<0.2",
+    "openinference-instrumentation>=0.3.20,<0.4",
+    "opentelemetry-api>=1.39.0,<2",
+    "opentelemetry-sdk>=1.39.0,<2",
 ]
 
 [project.urls]

@@ -1,29 +1,39 @@
-beautifulsoup4<=4.15.0
-google-genai<=2.22.0
-pandas<=3.0.5
-markdown<=3.10.3
-transformers<=5.22.2
-torch>=2.14.0 --extra-index-url https://download.pytorch.org/whl/cpu
-sentence_transformers<=6.2.0
-faiss-cpu<=1.15.1
-pypdf<=6.18.0
-python-docx<=1.2.0
-keybert<=0.9.0
-#span-marker<=1.8.1
-gradio<=6.26.0
-nltk<=3.10.3
-bm25s<=0.3.11
-PyStemmer<=3.1.0
-scipy>=1.18.1
-numpy<=2.5.3
-boto3<=1.43.90
-python-dotenv<=1.2.3
-peft
+# Intended for Hugging Face Spaces (Python 3.10) and pip installs that mirror pyproject.toml.
+# Version ranges align with pyproject.toml [project] dependencies.
+
+# --- Core and data ---
+beautifulsoup4>=4.12.3,<5
+google-genai>=2.33.0,<3
+pandas>=2.3.3,<4
+markdown>=3.10.3,<4
+numpy>=2,<2.5.0
+scipy>=1.14.0,<2
+boto3>=1.43.117,<2
+python-dotenv>=1.2.4,<2
+python-docx>=1.2.0,<2
+pypdf>=6.0.0,<7
+
+# --- ML / NLP / retrieval ---
+transformers>=5.19.0,<6
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.13.0,<=2.14.1
+sentence-transformers>=3.3.0,<6.3
+faiss-cpu>=1.9.0,<1.16
+keybert>=0.8.0,<1
+#span-marker>=1.8.0,<2
+nltk>=3.9.0,<4
+bm25s>=0.2.0,<0.4
+PyStemmer>=2.2.0,<4
+peft>=0.18.0,<0.22
+
+# --- Gradio ---
+gradio>=6.31.0,<7
+
 # Optional: Arize Phoenix / AX chat tracing (enable with ARIZE_TRACING_ENABLED=1)
-arize-phoenix-otel<=0.17.1
-openinference-semantic-conventions<=0.1.25
-openinference-instrumentation<=0.3.24
-opentelemetry-api<=1.39.1
-opentelemetry-sdk<=1.39.1
+arize-phoenix-otel>=0.17.0,<0.18
+openinference-semantic-conventions>=0.1.20,<0.2
+openinference-instrumentation>=0.3.20,<0.4
+opentelemetry-api>=1.39.0,<2
+opentelemetry-sdk>=1.39.0,<2
 # Optional: Arize AX cloud backend (ARIZE_BACKEND=ax)
-# arize-otel<=0.13.0
+# arize-otel>=0.13.0,<0.14

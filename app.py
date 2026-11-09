@@ -9,10 +9,12 @@ import tools.chatfuncs as chatf
 import tools.ingest as ing
 from tools.auth import authenticate_user
 from tools.aws_functions import upload_file_to_s3
+from tools.bedrock_kb_filter import kb_metadata_filter_enabled
 from tools.config import (
     ACCESS_LOGS_FOLDER,
     ARIZE_TRACING_ENABLED,
     BEDROCK_MODEL_ID,
+    CHAT_MEMORY_ENABLED,
     COGNITO_AUTH,
     DEFAULT_CONCURRENCY_LIMIT,
     DEFAULT_DATA_SOURCE,
@@ -48,6 +50,7 @@ from tools.config import (
     SMALL_MODEL_REPO_ID,
     USAGE_LOGS_FOLDER,
     USE_BEDROCK_KB,
+    USE_KB_METADATA_FILTER,
 )
 from tools.faiss_store import FAISS
 from tools.helper_functions import (
@@ -166,6 +169,21 @@ def create_hf_model(model_name: str, hf_token=HF_TOKEN):
     return model, tokenizer
 
 
+# Tracks large-model GPU layer count when a local model is resident in memory.
+_loaded_local_gpu_layers: int | None = None
+
+
+def _local_model_is_loaded(model_type: str, gpu_layers: int) -> bool:
+    mobj = chatf.model_object
+    if mobj is None or mobj == []:
+        return False
+    if (chatf.model_type or "") != (model_type or ""):
+        return False
+    if model_type == LARGE_MODEL_NAME:
+        return _loaded_local_gpu_layers == gpu_layers
+    return True
+
+
 def load_model(
     model_type: str,
     gpu_layers: int,
@@ -173,6 +191,24 @@ def load_model(
     cpu_config: dict = cpu_config,
     torch_device: str = torch_device,
 ):
+    if USE_BEDROCK_KB == "1":
+        msg = (
+            "Local model load skipped: USE_BEDROCK_KB=1 "
+            f"(answers use {BEDROCK_MODEL_ID})."
+        )
+        print(msg)
+        bedrock_label = f"AWS Bedrock KB ({BEDROCK_MODEL_ID})"
+        chatf.model_object = []
+        chatf.tokenizer = ""
+        chatf.model_type = bedrock_label
+        return bedrock_label, msg, bedrock_label
+
+    if _local_model_is_loaded(model_type, gpu_layers):
+        msg = f"Reusing in-memory model: {model_type}"
+        print(msg)
+        return model_type, msg, model_type
+
+    global _loaded_local_gpu_layers
     print("Loading model")
 
     if model_type == LARGE_MODEL_NAME:
@@ -219,6 +255,7 @@ def load_model(
     chatf.model_object = model
     chatf.tokenizer = tokenizer
     chatf.model_type = model_type
+    _loaded_local_gpu_layers = gpu_layers if model_type == LARGE_MODEL_NAME else None
 
     load_confirmation = "Finished loading model: " + model_type
 
@@ -239,14 +276,24 @@ app = blocks = gr.Blocks(
 )  # css=".gradio-container {background-color: black}")
 
 with app:
-    model_type = SMALL_MODEL_NAME
-    load_model(
-        model_type, 0, gpu_config, cpu_config, torch_device
-    )  # chatf.model_object, chatf.tokenizer, chatf.model_type =
+    if USE_BEDROCK_KB == "1":
+        model_type = f"AWS Bedrock KB ({BEDROCK_MODEL_ID})"
+        chatf.model_object = []
+        chatf.tokenizer = ""
+        chatf.model_type = model_type
+        print(
+            "USE_BEDROCK_KB=1: skipping local Hugging Face model load "
+            f"(generation uses {BEDROCK_MODEL_ID})."
+        )
+    else:
+        model_type = SMALL_MODEL_NAME
+        load_model(
+            model_type, 0, gpu_config, cpu_config, torch_device
+        )  # chatf.model_object, chatf.tokenizer, chatf.model_type =
 
-    # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
-    # model_type = "Phi 3.5 Mini (larger, slow)"
-    # load_model(model_type, gpu_layers, gpu_config, cpu_config, torch_device)
+        # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
+        # model_type = "Phi 3.5 Mini (larger, slow)"
+        # load_model(model_type, gpu_layers, gpu_config, cpu_config, torch_device)
 
     ingest_text = gr.State()
     ingest_metadata = gr.State()
@@ -298,10 +345,16 @@ with app:
 
     if USE_BEDROCK_KB == "1":
         kb_id_display = KNOWLEDGE_BASE_ID or "(not set — set KNOWLEDGE_BASE_ID)"
+        filter_banner = ""
+        if kb_metadata_filter_enabled(USE_KB_METADATA_FILTER):
+            filter_banner = (
+                "\n\n**Metadata filter:** `USE_KB_METADATA_FILTER` is on — each question "
+                "may trigger a Bedrock Converse call to build a retrieval filter before search."
+            )
         gr.Markdown(
             f"""**AWS Bedrock Knowledge Base mode is enabled** (`USE_BEDROCK_KB=1`).
 
-Local FAISS retrieval, local model generation, Gemini, and Bedrock Converse are **bypassed**. Questions are answered by AWS Bedrock `retrieve_and_generate` using knowledge base `{kb_id_display}` and model `{BEDROCK_MODEL_ID}`.
+Local FAISS retrieval, local model generation, Gemini, and Bedrock Converse are **bypassed**. Questions are answered by AWS Bedrock `retrieve_and_generate` using knowledge base `{kb_id_display}` and model `{BEDROCK_MODEL_ID}`.{filter_banner}
 
 The **Change data source** tab and **Advanced settings** model dropdown do not affect answers in this mode. Click **Clear chat** to start a new Bedrock session. AI chatbots may give incomplete or incorrect information — verify outputs before use."""
         )
@@ -344,7 +397,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
                 max_height=500,
             )
             with gr.Accordion(
-                "Source paragraphs with the most relevant text will appear here",
+                "Information sources",
                 open=True,
             ):
                 sources = gr.HTML(
@@ -352,18 +405,23 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
                     max_height=500,
                 )  # , height=chat_height
 
-        with gr.Accordion(
-            "Retrieval diagnostics (embedding search, hybrid fusion, reranker)",
-            open=False,
-            visible=USE_BEDROCK_KB != "1",
-        ):
-            retrieval_details = gr.Markdown(
-                value="Ask a question to see vector similarity scores and reranking steps.",
-            )
+        _retrieval_diagnostics_label = (
+            "Bedrock Knowledge Base retrieval (filter, chunk counts, steps)"
+            if USE_BEDROCK_KB == "1"
+            else "Retrieval diagnostics (embedding search, hybrid fusion, reranker)"
+        )
+        _retrieval_diagnostics_placeholder = (
+            "Ask a question to see metadata filters, chunk counts, and retrieval steps."
+            if USE_BEDROCK_KB == "1"
+            else "Ask a question to see vector similarity scores and reranking steps."
+        )
+        with gr.Accordion(_retrieval_diagnostics_label, open=False):
+            retrieval_details = gr.Markdown(value=_retrieval_diagnostics_placeholder)
 
         if USE_BEDROCK_KB == "1":
             gr.Markdown(
-                "Answers come from the AWS Bedrock Knowledge Base (local search and models are bypassed). Ask specific questions for better retrieval."
+                "Answers come from the AWS Bedrock Knowledge Base (local search and models are bypassed). "
+                "Expand **Bedrock Knowledge Base retrieval** above the question box for filter and count details."
             )
         else:
             gr.Markdown(
@@ -385,10 +443,19 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
             visible=USE_BEDROCK_KB != "1",
         )
 
+        _chat_memory_on = CHAT_MEMORY_ENABLED in {
+            "1",
+            "true",
+            "True",
+            "yes",
+            "on",
+            "YES",
+            "ON",
+        }
         current_topic = gr.Textbox(
-            label="Feature currently disabled - Keywords related to current conversation topic.",
+            label="Keywords related to current conversation topic (chat memory).",
             placeholder="Keywords related to the conversation topic will appear here",
-            visible=False,
+            visible=_chat_memory_on and USE_BEDROCK_KB != "1",
         )
 
     with gr.Tab("Change data source"):
@@ -787,7 +854,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
     ###
     # LOGGING AND ON APP LOAD FUNCTIONS
     ###
-    # Load in default model and embeddings for each user
+    # Per-browser session: folders/session id only — reuse in-process model + FAISS when already loaded
     app_load = app.load(
         get_connection_params,
         inputs=None,
@@ -797,28 +864,30 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
             session_hash_textbox,
             input_folder_textbox,
         ],
-    ).success(
-        load_model,
-        inputs=[
-            model_type_state,
-            gpu_layer_choice,
-            gpu_config_state,
-            cpu_config_state,
-            torch_device_state,
-        ],
-        outputs=[model_type_state, load_text, current_model],
     )
     if USE_BEDROCK_KB == "1":
         app_load = app_load.success(
             lambda: (
                 f"AWS Bedrock Knowledge Base: {KNOWLEDGE_BASE_ID or '(not set — set KNOWLEDGE_BASE_ID)'}",
                 f"AWS Bedrock KB ({BEDROCK_MODEL_ID})",
+                "Local chat model not loaded (Bedrock KB mode).",
+                f"AWS Bedrock KB ({BEDROCK_MODEL_ID})",
             ),
             inputs=None,
-            outputs=[current_source, current_model],
+            outputs=[current_source, current_model, load_text, model_type_state],
         )
-    if USE_BEDROCK_KB != "1":
-        app_load.success(
+    else:
+        app_load = app_load.success(
+            load_model,
+            inputs=[
+                model_type_state,
+                gpu_layer_choice,
+                gpu_config_state,
+                cpu_config_state,
+                torch_device_state,
+            ],
+            outputs=[model_type_state, load_text, current_model],
+        ).success(
             get_faiss_store,
             inputs=[default_embeddings_store_text, embeddings_model_object_state],
             outputs=[vectorstore_state],

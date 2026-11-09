@@ -1,0 +1,6 @@
+# Copy to config/kb_filter_groups.txt and edit for your KB (that file is gitignored).
+# One group label per line; # comments and blank lines ignored.
+
+Engineering
+Finance
+Operations

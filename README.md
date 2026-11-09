@@ -15,20 +15,34 @@ Chat with a pdf file or web page using a small language model (Gemma 3 1B) throu
 
 ## AWS Bedrock Knowledge Base mode
 
-Set `USE_BEDROCK_KB=1` to bypass local FAISS embedding/retrieval and local/Gemini/Bedrock Converse generation. The app calls Bedrock Agent Runtime `retrieve_and_generate` against an existing Knowledge Base (same flow as the council Lambda chat solution). Local “Change data source” ingest is unused in this mode.
+Set `USE_BEDROCK_KB=1` to bypass local FAISS embedding/retrieval and use Bedrock Agent Runtime against an existing Knowledge Base. **KB source files and ingest prep are maintained outside this repo**; configure env vars here to match your metadata schema.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `USE_BEDROCK_KB` | `0` | Enable Bedrock KB backend |
 | `KNOWLEDGE_BASE_ID` | _(empty)_ | Bedrock Knowledge Base ID (required when enabled) |
-| `BEDROCK_MODEL_ID` | `amazon.nova-pro-v1:0` | Foundation model ID for retrieve_and_generate |
+| `BEDROCK_MODEL_ID` | `amazon.nova-pro-v1:0` | Foundation model for retrieve_and_generate |
 | `GUARDRAIL_ID` | _(empty)_ | Optional Bedrock Guardrail ID |
 | `GUARDRAIL_VERSION` | _(empty)_ | Optional Guardrail version |
+| `USE_KB_METADATA_FILTER` | `0` | LLM-derived metadata filter before each KB query |
+| `KB_FILTER_MODEL_ID` | `amazon.nova-lite-v1:0` | Converse model for filter JSON (falls back to `BEDROCK_MODEL_ID` if empty) |
+| `KB_METADATA_FILTER_KEYS` | _(empty)_ | Comma-separated metadata keys from your KB schema |
+| `KB_DATE_METADATA_KEYS` | _(empty)_ | Raw date keys (rewritten/dropped per date strategy) |
+| `KB_YEAR_METADATA_KEYS` | _(empty)_ | Calendar-year string columns for `year_in` |
+| `KB_YEAR_COLUMNS_INDEXED` | `1` | Set `0` until `Year*` metadata exists on synced chunks (else `in` on year returns zero hits) |
+| `KB_DATE_TO_YEAR_MAP` | _(empty)_ | `SourceDate:YearKey` pairs for `year_in` |
+| `KB_METADATA_EXACT_EQUAL_KEYS` | `DocumentId` | Keys that keep `equals` |
+| `KB_METADATA_IN_KEYS` | _(empty)_ | Optional restrict `in` to these keys |
+| `KB_FILTER_PROMPT_PATH` | _(empty)_ | Custom prompt (`config/kb_filter_prompt.example.txt`) |
+| `KB_GROUP_FILTER_KEY` | _(empty)_ | Allow-listed group metadata key |
+| `KB_GROUP_OPTIONS_PATH` | _(empty)_ | Group labels file (e.g. local `config/kb_filter_groups.txt`, gitignored) |
+| `KB_SOURCE_LABEL_METADATA_KEYS` | `DocumentId,title,description,name` | Sources panel chunk headers |
+| `KB_DATE_FILTER_STRATEGY` | `semantic_only` | `semantic_only`, `year_in`, `iso_range`, `numeric_yyyymmdd` |
 | `AWS_REGION` / `AWS_DEFAULT_REGION` | _(empty; falls back to `eu-west-2`)_ | Region for the agent-runtime client and model ARN |
 
-Credentials follow the existing AWS pattern (instance/task role, or `AWS_ACCESS_KEY` / `AWS_SECRET_KEY` via `AWS_CONFIG_PATH`). IAM needs `bedrock:RetrieveAndGenerate` **and** `bedrock:Retrieve` (scored passage shortlist for the sources panel), plus permission to invoke the foundation model — broader than Converse-only access used when `RUN_AWS_FUNCTIONS=1`.
+With `USE_KB_METADATA_FILTER=1`, allow **Converse** on `KB_FILTER_MODEL_ID`. See [config/bedrock_metadata_filtering.md](config/bedrock_metadata_filtering.md).
 
-The sources accordion uses Bedrock **Retrieve** results (ranked by `score`). `RetrieveAndGenerate` citations alone often omit unused chunks and do not include retrieval scores.
+The sources accordion uses Bedrock **Retrieve** results (ranked by `score`). Each chunk is collapsible (passage text only; metadata not inlined). Expand **Bedrock Knowledge Base retrieval** for filters, chunk counts, and outcomes.
 
 ## Optional Jina reranker (local FAISS retrieval)
 
@@ -53,6 +67,10 @@ The reranker is ~0.6B parameters; expect extra RAM (~1–2GB) and slower retriev
 With `SHOW_RETRIEVAL_DETAILS=True`, each answer updates the closed **Retrieval diagnostics** accordion on the Chatbot tab (Markdown): FAISS cosine shortlist, hybrid fusion ranks/scores, and reranker scores when enabled. The **Source paragraphs** panel shows passage text only. Set `LOGGING=True` for JSON in the console and BM25 rank prints during retrieval.
 
 **License:** `jina-reranker-v3.5` is [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (non-commercial). Confirm that fits your deployment; commercial use requires permission from Jina.
+
+## Local FAISS mode — in-memory reuse
+
+When `USE_BEDROCK_KB=0`, the local chat model and FAISS index stay loaded in the **Python process** after the first load. Gradio page refreshes call `app.load` but **reuse** the same in-memory model and vector store instead of reloading from Hugging Face or re-extracting the embeddings zip.
 
 ## Arize Phoenix tracing (local)
 
