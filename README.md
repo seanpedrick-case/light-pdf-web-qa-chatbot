@@ -13,6 +13,21 @@ short_description: Chat with websites and documents using small language models
 
 Chat with a pdf file or web page using a small language model (Gemma 3 1B) through a Gradio interface. Quick responses even just using CPU. Default dataset is the [user guide for my Redaction app](https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html), which you can try out [here](https://huggingface.co/spaces/seanpedrickcase/document_redaction) for basic usage, or [here](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm) for GPU-enabled features
 
+## Amazon Bedrock AgentCore Harness mode
+
+Set `USE_AGENTCORE_HARNESS=1` to send chat questions to an AgentCore **harness** (configured Gateway tools and optional KB targets). Local FAISS and local model generation are bypassed.
+
+If both `USE_AGENTCORE_HARNESS=1` and `USE_BEDROCK_KB=1` are set, **harness mode wins** for this process. To use direct Bedrock KB RAG from this app, set `USE_AGENTCORE_HARNESS=0` and `USE_BEDROCK_KB=1`.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `USE_AGENTCORE_HARNESS` | `0` | Enable AgentCore Harness backend |
+| `AGENTCORE_HARNESS_ARN` | _(empty)_ | Harness ARN (required when enabled) |
+| `AGENTCORE_HARNESS_QUALIFIER` | _(empty)_ | Optional harness endpoint qualifier |
+| `AGENTCORE_HARNESS_RUNTIME_USER_ID` | _(empty)_ | Optional end-user id (else Gradio session hash) |
+
+The app role needs `bedrock-agentcore:InvokeHarness` on the harness resource. **Clear chat** starts a new harness `runtimeSessionId`. See `tools/agentcore_harness.py`.
+
 ## AWS Bedrock Knowledge Base mode
 
 Set `USE_BEDROCK_KB=1` to bypass local FAISS embedding/retrieval and use Bedrock Agent Runtime against an existing Knowledge Base. **KB source files and ingest prep are maintained outside this repo**; configure env vars here to match your metadata schema.

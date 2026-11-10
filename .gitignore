@@ -9,6 +9,7 @@ bootstrapper.py
 build/*
 dist/*
 test/*
+infra/*
 # Local KB / env config (templates *.example.* and *.md may be tracked below)
 config/*
 !config/kb_filter_prompt.example.txt

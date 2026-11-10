@@ -32,6 +32,11 @@ from transformers import (
     pipeline,
 )
 
+from tools.agentcore_harness import (
+    format_harness_details_markdown,
+    get_harness_response,
+    harness_mode_enabled,
+)
 from tools.chat_memory import (
     chat_history_turn_pairs,
     chat_memory_enabled,
@@ -40,6 +45,7 @@ from tools.chat_memory import (
     summarize_chat_history,
 )
 from tools.config import (
+    AGENTCORE_HARNESS_ARN,
     AWS_DEFAULT_REGION,
     AWS_MODELS,
     BEDROCK_MODEL_ID,
@@ -54,7 +60,8 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     SHOW_RETRIEVAL_DETAILS,
     SMALL_MODEL_NAME,
-    USE_BEDROCK_KB,
+    qa_backend_is_agentcore_harness,
+    qa_backend_is_bedrock_kb,
 )
 from tools.document import Document
 from tools.embeddings import HuggingFaceEmbeddings
@@ -637,10 +644,15 @@ def create_full_prompt(
         set_span_output,
     )
 
-    backend = "bedrock_kb" if USE_BEDROCK_KB == "1" else "local_faiss"
-    traced_model = (
-        f"AWS Bedrock KB ({BEDROCK_MODEL_ID})" if USE_BEDROCK_KB == "1" else model_type
-    )
+    if qa_backend_is_agentcore_harness():
+        backend = "agentcore_harness"
+        traced_model = f"AgentCore Harness ({AGENTCORE_HARNESS_ARN or 'not set'})"
+    elif qa_backend_is_bedrock_kb():
+        backend = "bedrock_kb"
+        traced_model = f"AWS Bedrock KB ({BEDROCK_MODEL_ID})"
+    else:
+        backend = "local_faiss"
+        traced_model = model_type
     with chat_span(
         "chat.retrieve",
         kind="RETRIEVER" if backend == "local_faiss" else "CHAIN",
@@ -653,8 +665,78 @@ def create_full_prompt(
             "qa.bedrock_session_id": session_out or None,
         },
     ) as span:
+        if qa_backend_is_agentcore_harness():
+            if not relevant_flag:
+                history.append(
+                    {
+                        "metadata": None,
+                        "options": None,
+                        "role": "user",
+                        "content": user_input,
+                    }
+                )
+                set_span_output(span, "")
+                return (
+                    history,
+                    "No relevant source paragraphs currently loaded",
+                    "",
+                    "",
+                    False,
+                    session_out,
+                    topic_out,
+                )
+
+            if chat_memory_enabled():
+                result = get_harness_response(
+                    user_input,
+                    session_id=session_out or None,
+                    runtime_user_id=session_hash or None,
+                )
+                session_out = result.get("sessionId", "") or ""
+            else:
+                result = get_harness_response(
+                    user_input,
+                    session_id=None,
+                    runtime_user_id=session_hash or None,
+                )
+                session_out = ""
+            topic_out = result.get("topic", "General Enquiry")
+            docs_content_string = result.get("sources_html", "")
+            instruction_prompt_out = result.get("response", "")
+            retrieval_details_md = format_harness_details_markdown(result)
+
+            set_span_output(span, instruction_prompt_out)
+            set_span_attr(span, "qa.topic", topic_out)
+            set_span_attr(span, "qa.harness_arn", AGENTCORE_HARNESS_ARN or None)
+            set_span_attr(span, "qa.harness_success", result.get("success", True))
+            if result.get("invoke_error"):
+                set_span_attr(span, "qa.harness_invoke_error", result["invoke_error"])
+            if result.get("stop_reason"):
+                set_span_attr(span, "qa.harness_stop_reason", result["stop_reason"])
+            tools = result.get("tool_uses") or []
+            set_span_attr(span, "qa.harness_tool_count", len(tools))
+            set_span_attr(span, "qa.bedrock_session_id", session_out or None)
+
+            history.append(
+                {
+                    "metadata": None,
+                    "options": None,
+                    "role": "user",
+                    "content": user_input,
+                }
+            )
+            return (
+                history,
+                docs_content_string,
+                retrieval_details_md,
+                instruction_prompt_out,
+                True,
+                session_out,
+                topic_out,
+            )
+
         # Bedrock Knowledge Base: retrieve + generate in one call; skip local FAISS RAG.
-        if USE_BEDROCK_KB == "1":
+        if qa_backend_is_bedrock_kb():
             from tools.bedrock_kb import get_rag_response
 
             if not relevant_flag:
@@ -1153,10 +1235,15 @@ def produce_streaming_answer_chatbot(
         yield from _produce_streaming_answer_chatbot_impl(**kwargs)
         return
 
-    backend = "bedrock_kb" if USE_BEDROCK_KB == "1" else "local_generate"
-    traced_model = (
-        f"AWS Bedrock KB ({BEDROCK_MODEL_ID})" if USE_BEDROCK_KB == "1" else model_type
-    )
+    if qa_backend_is_agentcore_harness():
+        backend = "agentcore_harness"
+        traced_model = f"AgentCore Harness ({AGENTCORE_HARNESS_ARN or 'not set'})"
+    elif qa_backend_is_bedrock_kb():
+        backend = "bedrock_kb"
+        traced_model = f"AWS Bedrock KB ({BEDROCK_MODEL_ID})"
+    else:
+        backend = "local_generate"
+        traced_model = model_type
     prompt_preview = full_prompt if isinstance(full_prompt, str) else str(full_prompt)
     # Prefer the raw Gradio message; fall back to last user turn in history.
     raw_query = (user_query or "").strip()
@@ -1248,11 +1335,16 @@ def _produce_streaming_answer_chatbot_impl(
         yield history
         return
 
-    # Bedrock KB already produced the final answer in create_full_prompt.
-    if USE_BEDROCK_KB == "1":
+    # Remote backends already produced the final answer in create_full_prompt.
+    if qa_backend_is_agentcore_harness() or qa_backend_is_bedrock_kb():
+        default_msg = (
+            "No response from harness."
+            if harness_mode_enabled()
+            else "No response from knowledge base."
+        )
         answer_text = full_prompt if isinstance(full_prompt, str) else str(full_prompt)
         answer_text = strip_model_artifacts(
-            (answer_text or "").strip() or "No response from knowledge base.",
+            (answer_text or "").strip() or default_msg,
             finalize=True,
         )
 
@@ -2243,8 +2335,8 @@ def add_inputs_answer_to_history(user_message, history, current_topic):
     if history is None:
         history = []
 
-    # Bedrock KB topic comes from citation filenames; keep it instead of KeyBERT.
-    if USE_BEDROCK_KB == "1":
+    # Remote backends set topic in create_full_prompt; keep it instead of KeyBERT.
+    if qa_backend_is_agentcore_harness() or qa_backend_is_bedrock_kb():
         return history, current_topic
 
     if not chat_memory_enabled():

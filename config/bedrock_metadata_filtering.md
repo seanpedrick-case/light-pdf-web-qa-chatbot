@@ -43,4 +43,4 @@ See [S3 Vectors metadata filtering](https://docs.aws.amazon.com/AmazonS3/latest/
 
 ## CSV record sidecar size
 
-For `public_foi_details.csv.metadata.json` (and similar `RECORD_BASED_STRUCTURE_METADATA` sidecars), ingestion can fail if the file is **over ~1 KB** when pretty-printed. Bedrock then **ignores** the sidecar (`MaximumFileSizeSupported: 1024 bytes`) and the CSV may show **Failed to ingest**. Keep the JSON **minified** (no extra whitespace); avoid long `metadataAttributes` strings. Re-upload the sidecar to S3 and sync.
+For `source.csv.metadata.json` (and similar `RECORD_BASED_STRUCTURE_METADATA` sidecars), ingestion can fail if the file is **over ~1 KB** when pretty-printed. Bedrock then **ignores** the sidecar (`MaximumFileSizeSupported: 1024 bytes`) and the CSV may show **Failed to ingest**. Keep the JSON **minified** (no extra whitespace); avoid long `metadataAttributes` strings. Re-upload the sidecar to S3 and sync.

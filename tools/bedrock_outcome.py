@@ -181,12 +181,13 @@ def diagnose_bedrock_kb_outcome(result: dict[str, Any]) -> dict[str, Any]:
             joined = ", ".join(f"`{k}`" for k in year_keys)
             explanations.append(
                 f"The filter used {joined}, but **unfiltered Retrieve** on this knowledge base "
-                f"returned chunks **without** those keys on metadata (e.g. `DateReceived` is present "
-                f"but `YearReceived` is missing). That usually means the **indexed copy** of the CSV "
-                f"was synced before the sidecar listed `fieldsToInclude` for the year columns, or "
-                f"S3 still has an older file. Re-upload `public_foi_details.csv` and its "
-                f"`.metadata.json`, run **Sync**, then confirm a sample chunk shows `YearReceived`. "
-                f"No date-to-year mapping is required if those CSV columns are already populated."
+                f"returned chunks **without** those keys on metadata (e.g. a raw date field is present "
+                f"but the calendar-year column from your schema is missing). That usually means the "
+                f"**indexed copy** of the structured source was synced before the sidecar listed "
+                f"`fieldsToInclude` for the year columns, or S3 still has an older file. Re-upload "
+                f"the source file and its `.metadata.json`, run **Sync**, then confirm a sample chunk "
+                f"shows the year keys from `KB_YEAR_METADATA_KEYS`. "
+                f"No date-to-year mapping is required if those columns are already on each chunk."
             )
         show_sources_alert = True
     elif passages == 0 and citations == 0:

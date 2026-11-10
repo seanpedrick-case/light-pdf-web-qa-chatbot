@@ -670,7 +670,7 @@ def _date_strategy_prompt_note(date_keys: FrozenSet[str]) -> str:
     if strategy == "numeric_yyyymmdd":
         return (
             f"\nDate columns ({date_list}) must be filtered with **integer YYYYMMDD** "
-            "range operators (e.g. greaterThanOrEquals 20230101, lessThan 20240101). "
+            "range operators (e.g. greaterThanOrEquals 20190101, lessThan 20200101). "
             "Do NOT use ISO strings unless KB_DATE_FILTER_STRATEGY=iso_range.\n"
         )
     if strategy == "year_in":
@@ -681,7 +681,7 @@ def _date_strategy_prompt_note(date_keys: FrozenSet[str]) -> str:
         return (
             f"\nDo **not** use range operators on {date_list}. For calendar **year** only, "
             f"use **in** on year metadata keys ({year_cols}) with four-digit string values "
-            '(e.g. {{"in":{{"key":"<YearKey>","value":["2023"]}}}}). '
+            '(e.g. {{"in":{{"key":"<YearKey>","value":["2019"]}}}}). '
             "Do not filter specific months or days.\n"
         )
     return (
@@ -839,8 +839,8 @@ def _default_filter_prompt_template(
         '  Right: {"equals": {"key": "Category", "value": "Policy"}}\n'
         '  Wrong: {"in": {"Status": ["Active", "Archived"]}}\n'
         '  Right: {"in": {"key": "Status", "value": ["Active", "Archived"]}}\n'
-        '  Wrong: {"greaterThan": {"PublishedAt": "2026-01-01"}}\n'
-        '  Right: {"greaterThan": {"key": "PublishedAt", "value": "2026-01-01T00:00:00Z"}} '
+        '  Wrong: {"greaterThan": {"PublishedAt": "2019-01-01"}}\n'
+        '  Right: {"greaterThan": {"key": "PublishedAt", "value": "2019-01-01T00:00:00Z"}} '
         "— range values for date keys must be full ISO-8601 with Z or offset.\n"
         f"{date_range_note}"
         "\n"

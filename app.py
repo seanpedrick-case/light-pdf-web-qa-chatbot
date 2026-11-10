@@ -12,6 +12,7 @@ from tools.aws_functions import upload_file_to_s3
 from tools.bedrock_kb_filter import kb_metadata_filter_enabled
 from tools.config import (
     ACCESS_LOGS_FOLDER,
+    AGENTCORE_HARNESS_ARN,
     ARIZE_TRACING_ENABLED,
     BEDROCK_MODEL_ID,
     CHAT_MEMORY_ENABLED,
@@ -49,8 +50,10 @@ from tools.config import (
     SMALL_MODEL_NAME,
     SMALL_MODEL_REPO_ID,
     USAGE_LOGS_FOLDER,
-    USE_BEDROCK_KB,
     USE_KB_METADATA_FILTER,
+    qa_backend_is_agentcore_harness,
+    qa_backend_is_bedrock_kb,
+    qa_backend_is_remote,
 )
 from tools.faiss_store import FAISS
 from tools.helper_functions import (
@@ -94,7 +97,7 @@ def update_models_for_provider(provider: str):
 # Load preset embeddings, vectorstore, and model
 ###
 # Skip local embeddings when Bedrock KB owns retrieval+generation.
-if USE_BEDROCK_KB == "1":
+if qa_backend_is_remote():
     embeddings_model = None
     vectorstore = None
     chatf.embeddings = None
@@ -191,7 +194,15 @@ def load_model(
     cpu_config: dict = cpu_config,
     torch_device: str = torch_device,
 ):
-    if USE_BEDROCK_KB == "1":
+    if qa_backend_is_agentcore_harness():
+        harness_label = f"AgentCore Harness ({AGENTCORE_HARNESS_ARN or 'set AGENTCORE_HARNESS_ARN'})"
+        msg = f"Local model load skipped: USE_AGENTCORE_HARNESS=1 (answers use {harness_label})."
+        print(msg)
+        chatf.model_object = []
+        chatf.tokenizer = ""
+        chatf.model_type = harness_label
+        return harness_label, msg, harness_label
+    if qa_backend_is_bedrock_kb():
         msg = (
             "Local model load skipped: USE_BEDROCK_KB=1 "
             f"(answers use {BEDROCK_MODEL_ID})."
@@ -276,7 +287,13 @@ app = blocks = gr.Blocks(
 )  # css=".gradio-container {background-color: black}")
 
 with app:
-    if USE_BEDROCK_KB == "1":
+    if qa_backend_is_agentcore_harness():
+        model_type = f"AgentCore Harness ({AGENTCORE_HARNESS_ARN or 'set ARN'})"
+        chatf.model_object = []
+        chatf.tokenizer = ""
+        chatf.model_type = model_type
+        print("USE_AGENTCORE_HARNESS=1: skipping local Hugging Face model load.")
+    elif qa_backend_is_bedrock_kb():
         model_type = f"AWS Bedrock KB ({BEDROCK_MODEL_ID})"
         chatf.model_object = []
         chatf.tokenizer = ""
@@ -343,7 +360,31 @@ with app:
 
     gr.Markdown("<h1><center>Lightweight PDF / web page QA bot</center></h1>")
 
-    if USE_BEDROCK_KB == "1":
+    if qa_backend_is_agentcore_harness():
+        harness_display = (
+            AGENTCORE_HARNESS_ARN or "(not set — set AGENTCORE_HARNESS_ARN)"
+        )
+        gr.Markdown(
+            f"""**AgentCore Harness mode is enabled** (`USE_AGENTCORE_HARNESS=1`).
+
+Local FAISS retrieval and local model generation are **bypassed**. Questions are sent to your AgentCore harness (`{harness_display}`), which runs its configured Gateway tools (e.g. structured data query, knowledge retrieval).
+
+Set `USE_BEDROCK_KB=0` to use harness mode; if both are `1`, harness wins. Click **Clear chat** to start a new harness session. AI chatbots may give incomplete or incorrect information — verify outputs before use."""
+        )
+        with gr.Row():
+            current_source = gr.Textbox(
+                label="Current data source(s)",
+                value=f"AgentCore Harness: {harness_display}",
+                scale=10,
+                max_lines=1,
+            )
+            current_model = gr.Textbox(
+                label="Current model",
+                value="AgentCore Harness",
+                scale=4,
+                max_lines=1,
+            )
+    elif qa_backend_is_bedrock_kb():
         kb_id_display = KNOWLEDGE_BASE_ID or "(not set — set KNOWLEDGE_BASE_ID)"
         filter_banner = ""
         if kb_metadata_filter_enabled(USE_KB_METADATA_FILTER):
@@ -363,11 +404,13 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
                 label="Current data source(s)",
                 value=f"AWS Bedrock Knowledge Base: {kb_id_display}",
                 scale=10,
+                max_lines=1,
             )
             current_model = gr.Textbox(
                 label="Current model",
                 value=f"AWS Bedrock KB ({BEDROCK_MODEL_ID})",
                 scale=3,
+                max_lines=1,
             )
     else:
         gr.Markdown(
@@ -375,9 +418,9 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
         )
         with gr.Row():
             current_source = gr.Textbox(
-                label="Current data source(s)", value=DEFAULT_DATA_SOURCE, scale=10
+                label="Current data source(s)", value=DEFAULT_DATA_SOURCE, scale=10, max_lines=1,
             )
-            current_model = gr.Textbox(label="Current model", value=model_type, scale=3)
+            current_model = gr.Textbox(label="Current model", value=model_type, scale=3, max_lines=1)
 
     if ARIZE_TRACING_ENABLED in {"1", "true", "True", "yes", "on"}:
         gr.Markdown(
@@ -405,20 +448,30 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
                     max_height=500,
                 )  # , height=chat_height
 
-        _retrieval_diagnostics_label = (
-            "Bedrock Knowledge Base retrieval (filter, chunk counts, steps)"
-            if USE_BEDROCK_KB == "1"
-            else "Retrieval diagnostics (embedding search, hybrid fusion, reranker)"
-        )
-        _retrieval_diagnostics_placeholder = (
-            "Ask a question to see metadata filters, chunk counts, and retrieval steps."
-            if USE_BEDROCK_KB == "1"
-            else "Ask a question to see vector similarity scores and reranking steps."
-        )
+        if qa_backend_is_agentcore_harness():
+            _retrieval_diagnostics_label = "AgentCore harness (tools, token usage)"
+            _retrieval_diagnostics_placeholder = "Ask a question to see harness stop reason, token usage, and tools invoked."
+        elif qa_backend_is_bedrock_kb():
+            _retrieval_diagnostics_label = (
+                "Bedrock Knowledge Base retrieval (filter, chunk counts, steps)"
+            )
+            _retrieval_diagnostics_placeholder = "Ask a question to see metadata filters, chunk counts, and retrieval steps."
+        else:
+            _retrieval_diagnostics_label = (
+                "Retrieval diagnostics (embedding search, hybrid fusion, reranker)"
+            )
+            _retrieval_diagnostics_placeholder = (
+                "Ask a question to see vector similarity scores and reranking steps."
+            )
         with gr.Accordion(_retrieval_diagnostics_label, open=False):
             retrieval_details = gr.Markdown(value=_retrieval_diagnostics_placeholder)
 
-        if USE_BEDROCK_KB == "1":
+        if qa_backend_is_agentcore_harness():
+            gr.Markdown(
+                "Answers come from your AgentCore harness (local search and models are bypassed). "
+                "Expand **AgentCore harness** diagnostics for tool and token details."
+            )
+        elif qa_backend_is_bedrock_kb():
             gr.Markdown(
                 "Answers come from the AWS Bedrock Knowledge Base (local search and models are bypassed). "
                 "Expand **Bedrock Knowledge Base retrieval** above the question box for filter and count details."
@@ -440,7 +493,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
         examples_set = gr.Radio(
             label="Example questions",
             choices=default_examples_set,
-            visible=USE_BEDROCK_KB != "1",
+            visible=not qa_backend_is_remote(),
         )
 
         _chat_memory_on = CHAT_MEMORY_ENABLED in {
@@ -455,11 +508,15 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
         current_topic = gr.Textbox(
             label="Keywords related to current conversation topic (chat memory).",
             placeholder="Keywords related to the conversation topic will appear here",
-            visible=_chat_memory_on and USE_BEDROCK_KB != "1",
+            visible=_chat_memory_on and not qa_backend_is_remote(),
         )
 
     with gr.Tab("Change data source"):
-        if USE_BEDROCK_KB == "1":
+        if qa_backend_is_agentcore_harness():
+            gr.Markdown(
+                "**Not used in AgentCore Harness mode.** Local uploads and FAISS indexing are bypassed; the harness and its Gateway tools are the data path."
+            )
+        elif qa_backend_is_bedrock_kb():
             gr.Markdown(
                 "**Not used in AWS Bedrock Knowledge Base mode.** Local uploads and FAISS indexing are bypassed; the remote knowledge base is the sole data source."
             )
@@ -495,7 +552,11 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
             file_out_box = gr.File(file_count="single", file_types=[".zip"])
 
     with gr.Tab("Advanced settings - change model/model options"):
-        if USE_BEDROCK_KB == "1":
+        if qa_backend_is_agentcore_harness():
+            gr.Markdown(
+                "**Not used in AgentCore Harness mode.** The harness uses its own configured model and tools."
+            )
+        elif qa_backend_is_bedrock_kb():
             gr.Markdown(
                 f"**Not used for generation in AWS Bedrock Knowledge Base mode.** Answers always use `{BEDROCK_MODEL_ID}` via Bedrock `retrieve_and_generate`. Changing provider/model below has no effect until `USE_BEDROCK_KB` is turned off."
             )
@@ -841,7 +902,16 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
         )
         .success(lambda: None, None, chatbot, queue=False)
     )
-    if USE_BEDROCK_KB == "1":
+    if qa_backend_is_agentcore_harness():
+        change_model_chain.success(
+            lambda: (
+                f"AgentCore Harness: {AGENTCORE_HARNESS_ARN or '(not set)'}",
+                "AgentCore Harness",
+            ),
+            inputs=None,
+            outputs=[current_source, current_model],
+        )
+    elif qa_backend_is_bedrock_kb():
         change_model_chain.success(
             lambda: (
                 f"AWS Bedrock Knowledge Base: {KNOWLEDGE_BASE_ID or '(not set — set KNOWLEDGE_BASE_ID)'}",
@@ -865,7 +935,18 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
             input_folder_textbox,
         ],
     )
-    if USE_BEDROCK_KB == "1":
+    if qa_backend_is_agentcore_harness():
+        app_load = app_load.success(
+            lambda: (
+                f"AgentCore Harness: {AGENTCORE_HARNESS_ARN or '(not set)'}",
+                "AgentCore Harness",
+                "Local chat model not loaded (AgentCore Harness mode).",
+                f"AgentCore Harness ({AGENTCORE_HARNESS_ARN or 'set ARN'})",
+            ),
+            inputs=None,
+            outputs=[current_source, current_model, load_text, model_type_state],
+        )
+    elif qa_backend_is_bedrock_kb():
         app_load = app_load.success(
             lambda: (
                 f"AWS Bedrock Knowledge Base: {KNOWLEDGE_BASE_ID or '(not set — set KNOWLEDGE_BASE_ID)'}",
