@@ -138,15 +138,128 @@ if AWS_SECRET_KEY:
 # Requires IAM permissions for bedrock:RetrieveAndGenerate / knowledge-base retrieve,
 # plus access to the foundation model. Credentials follow the same pattern as RUN_AWS_FUNCTIONS.
 USE_BEDROCK_KB = get_or_create_env_var("USE_BEDROCK_KB", "0")
+# AgentCore Harness (Gateway tools, etc.). When "1", takes precedence over USE_BEDROCK_KB.
+USE_AGENTCORE_HARNESS = get_or_create_env_var("USE_AGENTCORE_HARNESS", "0")
+AGENTCORE_HARNESS_ARN = get_or_create_env_var("AGENTCORE_HARNESS_ARN", "")
+AGENTCORE_HARNESS_QUALIFIER = get_or_create_env_var("AGENTCORE_HARNESS_QUALIFIER", "")
+AGENTCORE_HARNESS_RUNTIME_USER_ID = get_or_create_env_var(
+    "AGENTCORE_HARNESS_RUNTIME_USER_ID", ""
+)
 KNOWLEDGE_BASE_ID = get_or_create_env_var("KNOWLEDGE_BASE_ID", "")
 BEDROCK_MODEL_ID = get_or_create_env_var("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
 GUARDRAIL_ID = get_or_create_env_var("GUARDRAIL_ID", "")
 GUARDRAIL_VERSION = get_or_create_env_var("GUARDRAIL_VERSION", "")
-if USE_BEDROCK_KB == "1":
+
+USE_KB_METADATA_FILTER = get_or_create_env_var("USE_KB_METADATA_FILTER", "0")
+KB_FILTER_MODEL_ID = get_or_create_env_var("KB_FILTER_MODEL_ID", "amazon.nova-pro-v1:0")
+KB_METADATA_FILTER_KEYS = get_or_create_env_var("KB_METADATA_FILTER_KEYS", "")
+KB_DATE_METADATA_KEYS = get_or_create_env_var("KB_DATE_METADATA_KEYS", "")
+# Filterable calendar-year columns (four-digit year strings) for KB_DATE_FILTER_STRATEGY=year_in.
+KB_YEAR_METADATA_KEYS = get_or_create_env_var("KB_YEAR_METADATA_KEYS", "")
+# Set to 0 until Year* columns exist on synced KB chunk metadata.
+KB_YEAR_COLUMNS_INDEXED = get_or_create_env_var("KB_YEAR_COLUMNS_INDEXED", "1")
+# Map raw date metadata keys to calendar-year string columns for year_in (src:dest pairs).
+KB_DATE_TO_YEAR_MAP = get_or_create_env_var("KB_DATE_TO_YEAR_MAP", "")
+# Metadata keys that keep equals/notEquals (exact IDs). All other filter keys use in/notIn.
+KB_METADATA_EXACT_EQUAL_KEYS = get_or_create_env_var(
+    "KB_METADATA_EXACT_EQUAL_KEYS", "DocumentId"
+)
+# Bedrock sources panel: preferred metadata keys for chunk headers (first match wins).
+KB_SOURCE_LABEL_METADATA_KEYS = get_or_create_env_var(
+    "KB_SOURCE_LABEL_METADATA_KEYS", "DocumentId,title,description,name"
+)
+# Optional override: force in/notIn only on these keys. If empty, all allowed keys except
+# date keys and KB_METADATA_EXACT_EQUAL_KEYS use in/notIn.
+KB_METADATA_IN_KEYS = get_or_create_env_var("KB_METADATA_IN_KEYS", "")
+# How to apply date metadata in Bedrock RetrievalFilter (S3 Vectors vector store):
+#   semantic_only — drop date ranges (strings cannot use range; rely on semantic search)
+#   iso_range     — ISO-8601 greaterThanOrEquals / lessThan (OpenSearch / some managed KBs)
+#   numeric_yyyymmdd — integer YYYYMMDD bounds (filterable NUMBER metadata in S3 Vectors)
+#   year_in         — calendar year only via in on Year* string columns (single CSV, S3 Vectors)
+KB_DATE_FILTER_STRATEGY = get_or_create_env_var(
+    "KB_DATE_FILTER_STRATEGY", "semantic_only"
+)
+KB_FILTER_PROMPT_PATH = get_or_create_env_var("KB_FILTER_PROMPT_PATH", "")
+# Optional "group" metadata filter: one allow-listed categorical key (e.g. Department, Division).
+KB_GROUP_FILTER_KEY = get_or_create_env_var("KB_GROUP_FILTER_KEY", "")
+KB_GROUP_OPTIONS_PATH = get_or_create_env_var("KB_GROUP_OPTIONS_PATH", "")
+# Deprecated aliases (still read if the KB_GROUP_* vars are empty):
+if not (KB_GROUP_FILTER_KEY or "").strip():
+    KB_GROUP_FILTER_KEY = get_or_create_env_var("KB_ORG_FILTER_KEY", "")
+if not (KB_GROUP_OPTIONS_PATH or "").strip():
+    KB_GROUP_OPTIONS_PATH = get_or_create_env_var("KB_DIVISION_OPTIONS_PATH", "")
+
+
+def _parse_comma_env_keys(raw: str) -> frozenset[str]:
+    val = (raw or "").strip()
+    if not val:
+        return frozenset()
+    return frozenset(k.strip() for k in val.split(",") if k.strip())
+
+
+def _parse_date_to_year_map(raw: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in (raw or "").split(","):
+        piece = part.strip()
+        if not piece or ":" not in piece:
+            continue
+        src, dest = piece.split(":", 1)
+        src, dest = src.strip(), dest.strip()
+        if src and dest:
+            out[src] = dest
+    return out
+
+
+KB_METADATA_FILTER_KEY_SET = _parse_comma_env_keys(KB_METADATA_FILTER_KEYS)
+KB_DATE_METADATA_KEY_SET = _parse_comma_env_keys(KB_DATE_METADATA_KEYS)
+KB_YEAR_METADATA_KEY_SET = _parse_comma_env_keys(KB_YEAR_METADATA_KEYS)
+KB_DATE_TO_YEAR_MAP_DICT = _parse_date_to_year_map(KB_DATE_TO_YEAR_MAP)
+KB_SOURCE_LABEL_METADATA_KEY_LIST = [
+    k.strip() for k in (KB_SOURCE_LABEL_METADATA_KEYS or "").split(",") if k.strip()
+]
+KB_METADATA_EXACT_EQUAL_KEY_SET = _parse_comma_env_keys(KB_METADATA_EXACT_EQUAL_KEYS)
+KB_METADATA_IN_KEY_SET = _parse_comma_env_keys(KB_METADATA_IN_KEYS)
+
+
+def qa_backend_is_agentcore_harness() -> bool:
+    return USE_AGENTCORE_HARNESS == "1"
+
+
+def qa_backend_is_bedrock_kb() -> bool:
+    return USE_BEDROCK_KB == "1" and not qa_backend_is_agentcore_harness()
+
+
+def qa_backend_is_remote() -> bool:
+    return qa_backend_is_agentcore_harness() or qa_backend_is_bedrock_kb()
+
+
+if USE_AGENTCORE_HARNESS == "1" and USE_BEDROCK_KB == "1":
+    print(
+        "USE_AGENTCORE_HARNESS=1 takes precedence over USE_BEDROCK_KB=1 "
+        "(Bedrock KB direct mode disabled for this process)."
+    )
+if qa_backend_is_agentcore_harness():
+    print(
+        "USE_AGENTCORE_HARNESS=1: local FAISS retrieval/generation bypassed; "
+        f"harness_arn={AGENTCORE_HARNESS_ARN or '(not set)'}"
+    )
+elif USE_BEDROCK_KB == "1":
     print(
         "USE_BEDROCK_KB=1: local FAISS retrieval/generation bypassed; "
         f"KB_ID={KNOWLEDGE_BASE_ID or '(not set)'}, model={BEDROCK_MODEL_ID}"
     )
+    if USE_KB_METADATA_FILTER in {"1", "true", "True", "yes", "on"}:
+        if KB_METADATA_FILTER_KEY_SET:
+            print(
+                "USE_KB_METADATA_FILTER enabled: "
+                f"filter_model={KB_FILTER_MODEL_ID or BEDROCK_MODEL_ID}, "
+                f"keys={len(KB_METADATA_FILTER_KEY_SET)}"
+            )
+        else:
+            print(
+                "USE_KB_METADATA_FILTER=1 but KB_METADATA_FILTER_KEYS is empty; "
+                "metadata filter generation is skipped until keys are set."
+            )
 
 # Arize Phoenix / AX tracing for chat retrieve+generate turns (custom OTEL spans).
 # Local Phoenix: ARIZE_TRACING_ENABLED=1, ARIZE_BACKEND=phoenix,
@@ -170,6 +283,10 @@ if ARIZE_TRACING_ENABLED in {"1", "true", "True", "yes", "on"}:
         f"phoenix_endpoint={PHOENIX_COLLECTOR_ENDPOINT}, "
         f"project={PHOENIX_PROJECT_NAME or ARIZE_PROJECT_NAME or 'light-pdf-qa-chatbot'}"
     )
+
+# Multi-turn chat memory until the user clicks Clear chat (local FAISS + API models).
+# Bedrock KB uses the same flag to keep or drop the Bedrock session between turns.
+CHAT_MEMORY_ENABLED = get_or_create_env_var("CHAT_MEMORY_ENABLED", "0")
 
 QA_CHATBOT_BUCKET = get_or_create_env_var("QA_CHATBOT_BUCKET", "")
 

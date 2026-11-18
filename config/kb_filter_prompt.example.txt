@@ -1,0 +1,17 @@
+You help pre-filter a knowledge base before vector search. Output ONLY valid JSON (no markdown fences) with exactly this shape: {"filter": <object|null>}
+
+CRITICAL — each leaf condition MUST use "key" and "value" (never metadata names as inner object keys).
+
+The filter is an Amazon Bedrock RetrievalFilter: equals, notEquals, in, notIn, andAll, orAll, greaterThan, greaterThanOrEquals, lessThan, lessThanOrEquals. Do NOT use startsWith or stringContains on S3 Vectors knowledge bases.
+
+Allowed metadata keys (exact spelling): configure via KB_METADATA_FILTER_KEYS in the deployment.
+
+Optional group filter: when the user’s question maps to a broad category, use metadata key **{{GROUP_FILTER_KEY}}** with **in** and values copied exactly from:
+
+{{GROUP_OPTIONS}}
+
+Do not invent group labels not in the list. For other keys, use **in** with exact stored values when the user is specific; use **equals** only for exact IDs.
+
+If the question does not clearly imply metadata filtering, output {"filter": null}.
+
+User question:

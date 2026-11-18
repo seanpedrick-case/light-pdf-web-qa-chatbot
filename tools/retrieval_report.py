@@ -7,6 +7,10 @@ import json
 import logging
 from typing import Any, List, Optional
 
+from tools.bedrock_outcome import (
+    diagnose_bedrock_kb_outcome,
+    outcome_diagnosis_markdown_lines,
+)
 from tools.config import LOGGING
 from tools.document import Document
 
@@ -150,6 +154,107 @@ def format_retrieval_details_markdown(report: Optional[dict]) -> str:
                 f"- #{row.get('rank')}: score `{_format_score(row.get('score'))}` "
                 f"({row.get('score_kind', 'final')}) — `{row.get('source', '')}`"
             )
+
+    return "\n".join(lines).strip()
+
+
+def format_bedrock_kb_retrieval_details_markdown(result: Optional[dict]) -> str:
+    """Bedrock KB retrieval steps for the diagnostics accordion (Markdown)."""
+    from tools.bedrock_kb_filter import kb_metadata_filter_enabled
+    from tools.config import (
+        KB_METADATA_FILTER_KEY_SET,
+        USE_KB_METADATA_FILTER,
+    )
+
+    if not result:
+        return "_No Bedrock KB retrieval diagnostics for this turn._"
+
+    lines: List[str] = ["### Bedrock Knowledge Base retrieval", ""]
+
+    outcome = result.get("outcome_diagnosis") or diagnose_bedrock_kb_outcome(result)
+    lines.extend(outcome_diagnosis_markdown_lines(outcome))
+
+    query = result.get("user_message")
+    if query:
+        lines.append("#### Question sent to Bedrock")
+        lines.append(f"- `{query}`")
+        lines.append("")
+
+    filter_feature_on = kb_metadata_filter_enabled(USE_KB_METADATA_FILTER)
+    lines.append("#### 1. Metadata filter")
+    if not filter_feature_on:
+        lines.append("- **Auto filter:** disabled (`USE_KB_METADATA_FILTER` is off)")
+    elif not KB_METADATA_FILTER_KEY_SET:
+        lines.append(
+            "- **Auto filter:** enabled but inactive (`KB_METADATA_FILTER_KEYS` is empty)"
+        )
+    elif result.get("metadata_filter_generation_attempted"):
+        if result.get("metadataFilterApplied"):
+            lines.append("- **Auto filter:** inferred and **applied** to retrieval")
+        else:
+            lines.append(
+                "- **Auto filter:** generation ran; **no filter** used "
+                "(model returned null or filter failed validation)"
+            )
+    elif result.get("metadata_filter_explicit"):
+        if result.get("metadataFilterApplied"):
+            lines.append("- **Filter:** supplied explicitly and **applied**")
+        else:
+            lines.append("- **Filter:** explicit filter was empty or not applied")
+    else:
+        lines.append("- **Auto filter:** not run for this turn")
+
+    filt = result.get("metadata_filter")
+    if filt:
+        lines.append("")
+        lines.append("**RetrievalFilter sent to Bedrock:**")
+        lines.append("```json")
+        lines.append(json.dumps(filt, indent=2, ensure_ascii=False))
+        lines.append("```")
+    else:
+        lines.append("- **RetrievalFilter:** none (semantic search over full index)")
+    lines.append("")
+
+    lines.extend(
+        [
+            "#### 2. Retrieve API (sources panel)",
+            f"- **Chunks returned:** {result.get('passages_count', 0)} "
+            f"(requested up to {result.get('number_of_results_requested', 'n/a')})",
+        ]
+    )
+    top = result.get("top_score")
+    if top is not None:
+        lines.append(f"- **Top relevance score:** `{_format_score(top)}`")
+    if result.get("retrieve_error"):
+        lines.append(f"- **Retrieve error:** {result['retrieve_error']}")
+    lines.append(
+        "- _Counts are retrieved text chunks after vector search, not total "
+        "documents in the knowledge base. A metadata filter only restricts which "
+        "chunks are eligible before ranking._"
+    )
+    lines.append("")
+
+    lines.extend(
+        [
+            "#### 3. Retrieve and generate",
+            f"- **Citation groups in answer:** {result.get('citations_count', 0)}",
+        ]
+    )
+    if result.get("rag_skipped_after_retrieve_failure"):
+        lines.append(
+            "- **RetrieveAndGenerate:** skipped (Retrieve failed with the same filter)"
+        )
+    elif result.get("success") is False and result.get("generate_error"):
+        lines.append("- **RetrieveAndGenerate:** failed before a response was returned")
+    if result.get("generate_error"):
+        lines.append(f"- **Error:** {result['generate_error']}")
+    action = result.get("guardrail_action")
+    if action:
+        lines.append(f"- **Guardrail action (API):** `{action}`")
+    if result.get("guardrail"):
+        lines.append("- **Guardrail:** intervened on this response")
+    elif action:
+        lines.append("- **Guardrail:** did not intervene on this response")
 
     return "\n".join(lines).strip()
 

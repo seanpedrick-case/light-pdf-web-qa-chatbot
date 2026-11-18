@@ -33,6 +33,38 @@ class Embeddings(Protocol):
     def embed_query(self, text: str) -> List[float]: ...
 
 
+# In-process FAISS index cache (reuse across Gradio browser sessions).
+_faiss_store_cache: dict[str, FAISS] = {}
+
+
+def _embeddings_cache_token(embeddings_model: Embeddings) -> str:
+    return getattr(embeddings_model, "model_name", None) or repr(embeddings_model)
+
+
+def _faiss_cache_key(zip_path: Path, embeddings_model: Embeddings) -> str:
+    resolved = zip_path.resolve()
+    mtime = resolved.stat().st_mtime
+    return f"{resolved}|{mtime}|{_embeddings_cache_token(embeddings_model)}"
+
+
+def invalidate_faiss_cache(zip_file_path: str | Path | None = None) -> None:
+    """Drop cached index(es). Pass a zip path to invalidate one source; omit to clear all."""
+    if zip_file_path is None:
+        _faiss_store_cache.clear()
+        return
+    prefix = f"{Path(zip_file_path).resolve()}|"
+    for key in list(_faiss_store_cache):
+        if key.startswith(prefix):
+            del _faiss_store_cache[key]
+
+
+def _cache_faiss_store(
+    zip_file_path: str | Path, embeddings_model: Embeddings, store: FAISS
+) -> None:
+    key = _faiss_cache_key(Path(zip_file_path), embeddings_model)
+    _faiss_store_cache[key] = store
+
+
 import faiss  # For directly creating the FAISS index
 from bs4 import BeautifulSoup
 from docx import Document as Doc
@@ -792,6 +824,9 @@ def embed_faiss_save_to_zip(
     print("> Archive complete")
     print(f"> Final ZIP path: {final_zip_path}")
 
+    invalidate_faiss_cache(final_zip_path)
+    _cache_faiss_store(final_zip_path, embeddings_model_object, vectorstore)
+
     return (
         "Document processing complete",
         vectorstore,
@@ -820,6 +855,12 @@ def get_faiss_store(zip_file_path: str, embeddings_model: Embeddings) -> FAISS:
         raise FileNotFoundError(f"ZIP archive not found at: {zip_file_path}")
     if not zip_file_path.suffix == ".zip":
         raise ValueError(f"Expected a .zip file, but got: {zip_file_path}")
+
+    cache_key = _faiss_cache_key(zip_file_path, embeddings_model)
+    cached = _faiss_store_cache.get(cache_key)
+    if cached is not None:
+        print(f"> Reusing in-memory FAISS index: {zip_file_path}")
+        return cached
 
     # Create a temporary directory to extract the FAISS index files
     # tempfile.TemporaryDirectory() handles cleanup automatically when the 'with' block exits.
@@ -859,6 +900,7 @@ def get_faiss_store(zip_file_path: str, embeddings_model: Embeddings) -> FAISS:
     # when the `with tempfile.TemporaryDirectory()` block exits.
     # No need for manual os.remove() calls for index.faiss and index.pkl.
 
+    _faiss_store_cache[cache_key] = faiss_vstore
     return faiss_vstore
 
 
