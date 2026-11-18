@@ -414,13 +414,18 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
             )
     else:
         gr.Markdown(
-            f"""Chat with PDFs, web pages or data files (.csv / .xlsx). The default is a small model ({SMALL_MODEL_NAME}), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. Go to Advanced settings to change model to e.g. a choice of Gemini models that are available on [their very generous free tier](https://ai.google.dev/gemini-api/docs/pricing) (needs an API key), or AWS Bedrock/larger local models if activated.\n\nBy default '[{DEFAULT_DATA_SOURCE_NAME}]({DEFAULT_DATA_SOURCE})' is loaded as a data source. If you want to query another data source, please upload it on the 'Change data source' tab. If switching topic, please click the 'Clear chat' button. 'Stop generating' will halt the language model during its response.\n\n**Caution: On Hugging Face, this is a public app. Please ensure that the document you upload is not sensitive is any way as other users may see it!** Also, please note that AI chatbots may give incomplete or incorrect information, so please use with care and ensure that you verify any outputs before further use."""
+            f"""Chat with PDFs, web pages or data files (.csv / .xlsx). The default is a small model ({SMALL_MODEL_NAME}), that can only answer specific questions that are answered in the text. It cannot give overall impressions of, or summarise the document. Go to Advanced settings to change model to e.g. a choice of Gemini models that are available on [their very generous free tier](https://ai.google.dev/gemini-api/docs/pricing) (needs an API key), or AWS Bedrock/larger local models if activated.\n\nBy default '[{DEFAULT_DATA_SOURCE_NAME}]({DEFAULT_DATA_SOURCE})' is loaded as a data source. If you want to query another data source, please upload it on the 'Change data source' tab. If switching topic, please click the 'Clear chat' button. 'Stop generating' will halt the language model during its response.\n\n**Caution: On Hugging Face, this is a public app. Please ensure that the document you upload is not sensitive as other users may see it!** Also, please note that AI chatbots may give incomplete or incorrect information, so please use with care and ensure that you verify any outputs before further use."""
         )
         with gr.Row():
             current_source = gr.Textbox(
-                label="Current data source(s)", value=DEFAULT_DATA_SOURCE, scale=10, max_lines=1,
+                label="Current data source(s)",
+                value=DEFAULT_DATA_SOURCE,
+                scale=10,
+                max_lines=1,
             )
-            current_model = gr.Textbox(label="Current model", value=model_type, scale=3, max_lines=1)
+            current_model = gr.Textbox(
+                label="Current model", value=model_type, scale=3, max_lines=1
+            )
 
     if ARIZE_TRACING_ENABLED in {"1", "true", "True", "yes", "on"}:
         gr.Markdown(
@@ -547,7 +552,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
                 value="Load in CSV/Excel file", variant="secondary", scale=0
             )
 
-        with gr.Row():
+        with gr.Row(equal_height=True):
             ingest_embed_out = gr.Textbox(label="File/web page preparation progress")
             file_out_box = gr.File(file_count="single", file_types=[".zip"])
 
@@ -574,7 +579,7 @@ The **Change data source** tab and **Advanced settings** model dropdown do not a
             step=0.1,
             label="Choose temperature setting for response generation.",
         )
-        with gr.Row():
+        with gr.Row(equal_height=True):
             model_provider = gr.Dropdown(
                 label="Choose a provider",
                 value=DEFAULT_MODEL_PROVIDER,

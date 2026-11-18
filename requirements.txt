@@ -27,7 +27,7 @@ PyStemmer>=2.2.0,<4
 peft>=0.18.0,<0.22
 
 # --- Gradio ---
-gradio>=6.31.0,<7
+gradio>=6.32.0,<7
 
 # Optional: Arize Phoenix / AX chat tracing (enable with ARIZE_TRACING_ENABLED=1)
 arize-phoenix-otel>=0.17.0,<0.17.2
