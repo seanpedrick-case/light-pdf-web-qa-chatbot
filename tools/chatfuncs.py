@@ -491,7 +491,9 @@ def generate_expanded_prompt(
             new_question_kworded,
             vectorstore,
             embeddings_model,
-            k_val=25,
+            # Wide top-k so BM25 fusion and (when enabled) the reranker see a
+            # larger candidate pool than the final few output passages.
+            k_val=50,
             out_passages=out_passages,
             # Cosine similarity after L2-normalisation is roughly in [-1, 1]; keep
             # positively similar hits (old cut-off of 1 filtered almost everything).
@@ -1816,7 +1818,8 @@ def _print_retrieval_steps(report: dict) -> None:
     if rerank.get("results"):
         print(
             f"[retrieve] Reranker ({rerank.get('model')}): "
-            f"{len(rerank['results'])} passage(s) rescored."
+            f"{rerank.get('candidates')} candidate(s) rescored, "
+            f"top {len(rerank['results'])} kept."
         )
     elif rerank.get("skipped"):
         print(f"[retrieve] Reranker skipped: {rerank.get('reason')}")
@@ -1835,6 +1838,11 @@ def hybrid_retrieval(
 ) -> tuple:
     """
     Perform hybrid retrieval of relevant documents based on a query using vector similarity, BM25, and SVM weights.
+
+    The fused pool (up to k_val chunks after score/length filters) is ranked by
+    the weighted fusion score. When ENABLE_RERANKER is on, the whole pool is
+    rescored by the reranker (in fusion order) and only the top `out_passages`
+    are kept; otherwise the top `out_passages` by fusion rank are kept.
 
     Args:
         new_question_kworded (str): The keyword-adapted user query.
@@ -2011,10 +2019,35 @@ def hybrid_retrieval(
 
     pd.Series(best_rank_index_pos)
 
+    # Fusion shortlist: used as-is when the reranker is disabled, and as the
+    # fallback if the reranker fails.
     docs_keep_out = [docs_keep[i] for i in best_rank_index_pos]
 
-    hybrid_candidates = []
+    # When the reranker is enabled, rescore the whole fused pool (up to k_val
+    # chunks, ordered by fusion rank) and keep only the top `out_passages`.
+    # Feeding the pool in fusion order means a reranker failure naturally falls
+    # back to fusion order.
+    wide_rerank = ENABLE_RERANKER and docs_keep_length > out_passages
+    if wide_rerank:
+        pool_order = sorted(range(docs_keep_length), key=lambda i: final_rank[i])
+        rerank_input = [docs_keep[i] for i in pool_order]
+        input_to_keep = pool_order
+    else:
+        rerank_input = docs_keep_out
+        input_to_keep = best_rank_index_pos
+
+    docs_keep_out, rerank_meta = _maybe_rerank(
+        new_question_kworded, rerank_input, out_passages
+    )
+    if wide_rerank and not rerank_meta.get("results"):
+        # Reranker skipped or failed: keep the fusion shortlist.
+        docs_keep_out = [docs_keep[i] for i in best_rank_index_pos]
+
     selected_set = set(best_rank_index_pos)
+    if rerank_meta.get("results"):
+        selected_set = {input_to_keep[r["index"]] for r in rerank_meta["results"]}
+
+    hybrid_candidates = []
     for i, item in enumerate(docs_keep):
         hybrid_candidates.append(
             {
@@ -2032,9 +2065,6 @@ def hybrid_retrieval(
         "candidates": hybrid_candidates,
     }
 
-    docs_keep_out, rerank_meta = _maybe_rerank(
-        new_question_kworded, docs_keep_out, out_passages
-    )
     report["rerank"] = rerank_meta
     score_kind = "reranker" if rerank_meta.get("results") else "hybrid_fusion"
     _print_retrieval_steps(report)

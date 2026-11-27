@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "light-pdf-web-qa-chatbot"
-version = "0.5.0"
+version = "0.5.1"
 description = "Chat with PDFs, web pages, or data files using a Gradio-based QA chatbot"
 readme = "README.md"
 authors = [
